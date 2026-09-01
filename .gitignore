@@ -1,0 +1,52 @@
+# Godot 4 metadata, imported files and cache
+.godot/
+
+# Native binaries from GDExtension / C++ compilation
+bin/
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.lib
+*.a
+*.exp
+
+# C# / Mono project files (si applicable)
+.mono/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+bld/
+[Bb]in/
+[Oo]bj/
+*.csproj
+*.sln
+
+# Crash logs and debug dumps
+*.log
+*.core
+
+# Export outputs
+builds/
+exports/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE & Editor caches
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.swp
+*.bak
+*~
+
+# AI agent temporary logs/context dumps
+.claude/
+.cursor/
