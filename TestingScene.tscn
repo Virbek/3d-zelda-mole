@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://b07lnyprg4fw0" path="res://Script/camera_rig.gd" id="1_iyuba"]
 [ext_resource type="PackedScene" uid="uid://b34mk8qpxnm3e" path="res://prefab/Enemy.tscn" id="1_ypt0w"]
 [ext_resource type="Script" uid="uid://bn1pb4k3883he" path="res://Script/player/player.gd" id="2_6mnxl"]
+[ext_resource type="PackedScene" uid="uid://otfyx1hk6wag" path="res://prefab/HealthBar.tscn" id="2_7hjm2"]
 [ext_resource type="Script" uid="uid://b5w3j321nkicy" path="res://Script/player/rig.gd" id="3_6mnxl"]
 [ext_resource type="Script" uid="uid://d24fcjnhsun8w" path="res://Script/player/combat.gd" id="5_5gf4p"]
 
@@ -38,6 +39,9 @@ size = Vector3(1.9990234, 1, 1.9863281)
 [node name="Enemy" parent="." unique_id=465677058 instance=ExtResource("1_ypt0w")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 3.7087884)
 
+[node name="Node3D" parent="Enemy" unique_id=661807815 instance=ExtResource("2_7hjm2")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.7, 0)
+
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1335146338]
 transform = Transform3D(0.81915206, 0.43938506, -0.36868784, 0, 0.64278764, 0.76604444, 0.57357645, -0.62750685, 0.5265408, 0, 0, 0)
 shadow_enabled = true
@@ -45,7 +49,7 @@ shadow_enabled = true
 [node name="Ground" type="StaticBody3D" parent="." unique_id=700059434]
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Ground" unique_id=2002832432]
-transform = Transform3D(30, 0, 0, 0, 0.2, 0, 0, 0, 30, 0, 0, 0)
+transform = Transform3D(30, 0, 0, 0, 0.2, 0, 0, 0, 30, 0, -0.005229652, 0)
 mesh = SubResource("PlaneMesh_osq7l")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Ground" unique_id=692270773]
@@ -80,6 +84,7 @@ player_path = NodePath("..")
 bob_height = 0.02
 sway_degrees = 2.0
 hand_offset = Vector3(0.55, 0.2, 0.05)
+attack_reach = 1.5
 
 [node name="Body" type="Node3D" parent="Player/Rig" unique_id=174431133]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
