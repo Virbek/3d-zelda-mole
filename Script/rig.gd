@@ -20,6 +20,14 @@ extends Node3D
 @onready var body: Node3D = $Body
 @onready var foot_l: Node3D = $FootL
 @onready var foot_r: Node3D = $FootR
+@export var sprint_lean_multiplier: float = 1.7
+@export var sprint_lead_multiplier: float = 1.8
+
+@export_group("Ressenti des pas")
+@export var bob_height: float = 0.07      ## montée du corps pendant un pas
+@export var sway_degrees: float = 5.0     ## roulis vers le pied d'appui
+@export var push_impulse: float = 0.9     ## coup de reins au départ du pas
+@export var land_impulse: float = 1.3     ## encaissement à la pose
 
 class Foot:
 	var node: Node3D
@@ -32,6 +40,7 @@ class Foot:
 
 var _feet := []
 var _body_vel := Vector3.ZERO
+var _body_pos := Vector3.ZERO
 
 func _ready() -> void:
 	for n in [body, foot_l, foot_r]:
@@ -47,7 +56,8 @@ func _ready() -> void:
 	for f in _feet:
 		f.planted = _rest_target(f)
 		f.node.global_position = f.planted
-	body.global_position = player.global_position + Vector3.UP * body_height
+	_body_pos = player.global_position + Vector3.UP * body_height
+	body.global_position = _body_pos
 
 func _physics_process(delta: float) -> void:
 	_update_feet(delta)
@@ -59,7 +69,10 @@ func _rest_target(f: Foot) -> Vector3:
 	var hv := Vector3(player.velocity.x, 0.0, player.velocity.z)
 	var lead := Vector3.ZERO
 	if hv.length() > 0.1:
-		lead = hv.normalized() * step_lead
+		var l := step_lead
+		if player.is_sprinting:
+			l *= sprint_lead_multiplier
+		lead = hv.normalized() * l
 
 	var p: Vector3 = player.global_position + b.x * f.side * stance_width + lead
 	# Cherche le sol réel sous la position visée
@@ -86,6 +99,7 @@ func _update_feet(delta: float) -> void:
 				f.t = 1.0
 				f.stepping = false
 				f.planted = f.to
+				_body_vel.y -= land_impulse
 			var p: Vector3 = f.from.lerp(f.to, f.t)
 			p.y += sin(f.t * PI) * step_height   # arc du pas
 			f.node.global_position = p
@@ -112,23 +126,47 @@ func _update_feet(delta: float) -> void:
 		worst.from = worst.planted
 		worst.to = _rest_target(worst)
 
+		var dir: Vector3 = worst.to - worst.from
+		dir.y = 0.0
+		if dir.length() > 0.01:
+			_body_vel += dir.normalized() * push_impulse
+
 func _update_body(delta: float) -> void:
 	var mid: Vector3 = (foot_l.global_position + foot_r.global_position) * 0.5
 	var target: Vector3 = mid + Vector3.UP * body_height
 
-	var to_target: Vector3 = target - body.global_position
+	# --- Ressort : la traction, lente ---
+	var to_target: Vector3 = target - _body_pos
 	_body_vel += to_target * stiffness * delta
 	_body_vel *= exp(-damping * delta)
-	body.global_position += _body_vel * delta
+	_body_pos += _body_vel * delta
 
-	# L'étirement du ressort EST la force subie : on incline dessus.
+	# --- Rythme des pas : rapide, hors ressort ---
+	var step_t := -1.0
+	var support := 0.0
+	for f in _feet:
+		if f.stepping:
+			step_t = f.t
+			support = -f.side   # l'appui est sur le pied resté au sol
+
+	var bob := 0.0
+	var sway := 0.0
+	if step_t >= 0.0:
+		var s := sin(step_t * PI)
+		bob = s * bob_height
+		sway = s * support * deg_to_rad(sway_degrees)
+
+	body.global_position = _body_pos + Vector3.UP * bob
+
+	# --- Inclinaison ---
 	var pull := to_target
 	pull.y = 0.0
 	var local_pull: Vector3 = Basis(Vector3.UP, player.rotation.y).inverse() * pull
 	local_pull /= lean_pull_scale
 
 	var lean := deg_to_rad(lean_degrees)
+	if player.is_sprinting:
+		lean *= sprint_lean_multiplier
 	body.rotation.y = player.rotation.y
-	# Tiré par les pieds : le bas suit la traction, le haut part en arrière
 	body.rotation.x = lerp(body.rotation.x, -clampf(local_pull.z, -1.0, 1.0) * lean, 10.0 * delta)
-	body.rotation.z = lerp(body.rotation.z, clampf(local_pull.x, -1.0, 1.0) * lean, 10.0 * delta)
+	body.rotation.z = lerp(body.rotation.z, clampf(local_pull.x, -1.0, 1.0) * lean, 10.0 * delta) + sway

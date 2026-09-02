@@ -5,6 +5,10 @@ extends CharacterBody3D
 @export var rotation_speed: float = 14.0
 @export var gravity: float = 20.0
 
+@export var sprint_speed: float = 10.0
+
+var is_sprinting: bool = false
+
 const CAM_YAW := deg_to_rad(45.0)
 
 func _physics_process(delta: float) -> void:
@@ -17,7 +21,11 @@ func _physics_process(delta: float) -> void:
 
 	var direction := Vector3(input.x, 0.0, input.y).rotated(Vector3.UP, CAM_YAW)
 
-	var target := direction*speed
+	is_sprinting = Input.is_action_pressed("sprint") and direction.length_squared() > 0.01
+
+	var current_speed: float = sprint_speed if is_sprinting else speed
+
+	var target := direction* current_speed
 
 	velocity.x = move_toward(velocity.x, target.x, acceleration*delta)
 	velocity.z = move_toward(velocity.z, target.z, acceleration*delta)
