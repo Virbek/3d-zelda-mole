@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://u0qu6fw50sb6"]
 
 [ext_resource type="Script" uid="uid://b07lnyprg4fw0" path="res://Script/camera_rig.gd" id="1_iyuba"]
+[ext_resource type="PackedScene" uid="uid://b34mk8qpxnm3e" path="res://Enemy.tscn" id="1_ypt0w"]
 [ext_resource type="Script" uid="uid://bn1pb4k3883he" path="res://Script/player.gd" id="2_6mnxl"]
 [ext_resource type="Script" uid="uid://b5w3j321nkicy" path="res://Script/rig.gd" id="3_6mnxl"]
 
@@ -23,11 +24,18 @@ size = Vector3(1.9990234, 1, 1.9863281)
 
 [sub_resource type="SphereMesh" id="SphereMesh_6mnxl"]
 
+[sub_resource type="SphereMesh" id="SphereMesh_j4swo"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_an2lv"]
+
 [sub_resource type="BoxMesh" id="BoxMesh_osq7l"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_osq7l"]
 
 [node name="Node3D" type="Node3D" unique_id=1847682603]
+
+[node name="Enemy" parent="." unique_id=465677058 instance=ExtResource("1_ypt0w")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 3.7087884)
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1335146338]
 transform = Transform3D(0.81915206, 0.43938506, -0.36868784, 0, 0.64278764, 0.76604444, 0.57357645, -0.62750685, 0.5265408, 0, 0, 0)
@@ -70,6 +78,7 @@ script = ExtResource("3_6mnxl")
 player_path = NodePath("..")
 bob_height = 0.02
 sway_degrees = 2.0
+hand_offset = Vector3(0.55, 0.2, 0.05)
 
 [node name="Body" type="Node3D" parent="Player/Rig" unique_id=174431133]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
@@ -91,6 +100,18 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, 0)
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Player/Rig/FootR" unique_id=1004309256]
 transform = Transform3D(0.4, 0, 0, 0, 0.4, 0, 0, 0, 0.4, 0, 0, 0)
 mesh = SubResource("SphereMesh_6mnxl")
+
+[node name="HandR" type="Node3D" parent="Player/Rig" unique_id=1827813119]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Player/Rig/HandR" unique_id=1135453900]
+transform = Transform3D(0.4, 0, 0, 0, 0.4, 0, 0, 0, 0.4, 0, 0, 0)
+mesh = SubResource("SphereMesh_j4swo")
+
+[node name="HandL" type="Node3D" parent="Player/Rig" unique_id=1485633582]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Player/Rig/HandL" unique_id=565617797]
+transform = Transform3D(0.4, 0, 0, 0, 0.4, 0, 0, 0, 0.4, 0, 0, 0)
+mesh = SubResource("SphereMesh_an2lv")
 
 [node name="StaticBody3D" type="StaticBody3D" parent="." unique_id=940025571]
 transform = Transform3D(2.635, 0, 0, 0, 4.775, 0, 0, 0, 2.635, 0, 2.2377598, -5.385519)
