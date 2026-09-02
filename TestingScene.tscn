@@ -1,9 +1,10 @@
 [gd_scene format=3 uid="uid://u0qu6fw50sb6"]
 
 [ext_resource type="Script" uid="uid://b07lnyprg4fw0" path="res://Script/camera_rig.gd" id="1_iyuba"]
-[ext_resource type="PackedScene" uid="uid://b34mk8qpxnm3e" path="res://Enemy.tscn" id="1_ypt0w"]
-[ext_resource type="Script" uid="uid://bn1pb4k3883he" path="res://Script/player.gd" id="2_6mnxl"]
-[ext_resource type="Script" uid="uid://b5w3j321nkicy" path="res://Script/rig.gd" id="3_6mnxl"]
+[ext_resource type="PackedScene" uid="uid://b34mk8qpxnm3e" path="res://prefab/Enemy.tscn" id="1_ypt0w"]
+[ext_resource type="Script" uid="uid://bn1pb4k3883he" path="res://Script/player/player.gd" id="2_6mnxl"]
+[ext_resource type="Script" uid="uid://b5w3j321nkicy" path="res://Script/player/rig.gd" id="3_6mnxl"]
+[ext_resource type="Script" uid="uid://d24fcjnhsun8w" path="res://Script/player/combat.gd" id="5_5gf4p"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_osq7l"]
 
@@ -112,6 +113,13 @@ mesh = SubResource("SphereMesh_j4swo")
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Player/Rig/HandL" unique_id=565617797]
 transform = Transform3D(0.4, 0, 0, 0, 0.4, 0, 0, 0, 0.4, 0, 0, 0)
 mesh = SubResource("SphereMesh_an2lv")
+
+[node name="Combat" type="Node3D" parent="Player" unique_id=1908521376]
+script = ExtResource("5_5gf4p")
+rig_path = NodePath("../Rig")
+durations = Array[float]([0.3, 0.3, 0.75])
+hit_radius = 0.75
+hit_windows = Array[Vector2]([Vector2(0.05, 0.95), Vector2(0.05, 0.95), Vector2(0.45, 0.8)])
 
 [node name="StaticBody3D" type="StaticBody3D" parent="." unique_id=940025571]
 transform = Transform3D(2.635, 0, 0, 0, 4.775, 0, 0, 0, 2.635, 0, 2.2377598, -5.385519)

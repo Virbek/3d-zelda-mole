@@ -1,0 +1,86 @@
+extends CharacterBody3D
+
+@export var speed: float = 6.0
+@export var acceleration: float = 25.0
+@export var rotation_speed: float = 14.0
+@export var gravity: float = 20.0
+
+@export var sprint_speed: float = 10.0
+
+@export_group("Esquive")
+@export var dodge_speed: float = 16.0
+@export var dodge_duration: float = 0.26
+@export var dodge_cooldown: float = 0.18
+@export var iframe_window := Vector2(0.05, 0.65)
+
+var is_sprinting: bool = false
+
+const CAM_YAW := deg_to_rad(45.0)
+
+var is_dodging: bool = false
+var is_invulnerable: bool = false
+var _dodge_t: float = 0.0
+var _dodge_dir := Vector3.ZERO
+var _dodge_cd: float = 0.0
+
+func _physics_process(delta: float) -> void:
+	
+	if is_on_floor():
+		velocity.y = 0.0
+	else:
+		velocity.y -= gravity * delta
+	
+	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	var direction := Vector3(input.x, 0.0, input.y).rotated(Vector3.UP, CAM_YAW)
+
+	if _dodge_cd > 0.0:
+		_dodge_cd = maxf(_dodge_cd - delta, 0.0)
+
+	if Input.is_action_just_pressed("dodge") and not is_dodging and _dodge_cd <= 0.0:
+		is_dodging = true
+		_dodge_t = 0.0
+		_dodge_cd = dodge_duration + dodge_cooldown
+		# Sans input directionnel : pas en arrière
+		_dodge_dir = direction.normalized() if direction.length_squared() > 0.01 \
+			else -global_transform.basis.z * -1.0
+
+	is_sprinting = Input.is_action_pressed("sprint") and direction.length_squared() > 0.01
+
+	var current_speed: float = sprint_speed if is_sprinting else speed
+
+	var target := direction* current_speed
+
+	velocity.x = move_toward(velocity.x, target.x, acceleration*delta)
+	velocity.z = move_toward(velocity.z, target.z, acceleration*delta)
+
+	if direction.length_squared() > 0.01:
+		var angle := atan2(-direction.x, -direction.z)
+		rotation.y = lerp_angle(rotation.y, angle, rotation_speed * delta)
+	
+
+	move_and_slide()
+
+	if is_dodging:
+		_dodge_t += delta / dodge_duration
+		is_invulnerable = _dodge_t >= iframe_window.x and _dodge_t <= iframe_window.y
+
+		# Tient la vitesse puis coupe net
+		var e: float = 1.0 - pow(_dodge_t, 3.0)
+		velocity.x = _dodge_dir.x * dodge_speed * e
+		velocity.z = _dodge_dir.z * dodge_speed * e
+
+		# Le perso regarde où il va
+		var a := atan2(-_dodge_dir.x, -_dodge_dir.z)
+		rotation.y = lerp_angle(rotation.y, a, 20.0 * delta)
+
+		if is_on_floor():
+			velocity.y = 0.0
+		else:
+			velocity.y -= gravity * delta
+
+		move_and_slide()
+
+		if _dodge_t >= 1.0:
+			is_dodging = false
+			is_invulnerable = false
+		return
