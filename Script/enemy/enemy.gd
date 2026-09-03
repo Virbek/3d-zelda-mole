@@ -77,6 +77,25 @@ var _base_scale := Vector3.ONE
 var _flash_tween: Tween
 var _tele_tween: Tween
 
+@export_group("Encerclement")
+@export var circle_distance: float = 4.5
+@export var circle_speed: float = 2.2
+@export var circle_dir: float = 1.0   ## 1 ou -1, à varier entre ennemis
+
+
+func _circle(delta: float, d: float) -> void:
+	var to_player: Vector3 = _dir_to_player()
+	var tangent: Vector3 = to_player.cross(Vector3.UP) * circle_dir
+
+	# Maintient la distance tout en tournant
+	var radial: float = (d - circle_distance) * 0.8
+	var move: Vector3 = tangent + to_player * radial
+	move = move.normalized()
+
+	velocity.x = move.x * circle_speed
+	velocity.z = move.z * circle_speed
+	_face(to_player, delta)
+
 
 func _ready() -> void:
 	health = max_health
@@ -88,6 +107,8 @@ func _ready() -> void:
 
 	health_bar.set_ratio(1.0)
 	attack_box.monitoring = false
+
+	circle_dir = 1.0 if randf() > 0.5 else -1.0
 
 
 func _physics_process(delta: float) -> void:
@@ -145,8 +166,12 @@ func _chase(delta: float) -> void:
 		_lose_t = 0.0
 
 	if d < charge_range and _cooldown <= 0.0:
-		_set_state(State.TELEGRAPH)
-		_start_telegraph()
+		if AttackToken.request(self):
+			_set_state(State.TELEGRAPH)
+			_start_telegraph()
+			return
+		# Jeton pris : on tourne autour en attendant
+		_circle(delta, d)
 		return
 
 	var dir: Vector3 = _dir_to_player()
@@ -195,6 +220,7 @@ func _charge(_delta: float) -> void:
 
 	if travelled >= charge_distance or blocked or _t >= charge_max_time:
 		attack_box.monitoring = false
+		AttackToken.release(self)
 		_cooldown = charge_cooldown
 		_set_state(State.RECOVER)
 
@@ -286,6 +312,7 @@ func take_hit(direction: Vector3) -> void:
 
 	# Une charge interrompue par un coup : c'est la récompense du joueur
 	attack_box.monitoring = false
+	AttackToken.release(self)
 	mesh.scale = _base_scale
 
 	_knockback = direction * knockback_force
@@ -331,6 +358,6 @@ func _die(direction: Vector3) -> void:
 	d.tween_property(mesh, "scale", Vector3(1.3, 0.05, 1.3), death_time)\
 		.set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_BACK)
 	d.tween_property(_mat, "albedo_color:a", 0.0, death_time)
-
+	AttackToken.release(self)
 	await d.finished
 	queue_free()

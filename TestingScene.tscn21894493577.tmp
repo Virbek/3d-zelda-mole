@@ -39,13 +39,12 @@ height = 3.980713
 player_path = NodePath("../Player")
 
 [node name="Enemy" parent="." unique_id=465677058 instance=ExtResource("1_ypt0w")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8.050418, -0.28609848, -4.1552916)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.3482084, 0, -0.33983994)
 player_path = NodePath("../Player")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1335146338]
-transform = Transform3D(0.81915206, 0.43938503, -0.36868784, 0, 0.64278764, 0.76604444, 0.57357645, -0.62750685, 0.5265408, 0, 28.800007, 0)
+transform = Transform3D(0.81915206, 0.43938506, -0.36868784, 0, 0.64278764, 0.76604444, 0.57357645, -0.62750685, 0.5265408, 0, 0, 0)
 shadow_enabled = true
-sky_mode = 1
 
 [node name="Ground" type="StaticBody3D" parent="." unique_id=700059434]
 
@@ -71,8 +70,6 @@ size = 12.0
 [node name="Player" type="CharacterBody3D" parent="." unique_id=66199162]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 61.748955, 3.05968, -5.4082975)
 script = ExtResource("2_6mnxl")
-sprint_speed = 12.0
-dodge_speed = 20.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Player" unique_id=2015889366]
 transform = Transform3D(0.4, 0, 0, 0, 0.4, 0, 0, 0, 0.4, 0.0060014427, 0.45024416, 0.01980406)
@@ -86,7 +83,6 @@ sway_degrees = 2.0
 dodge_lead_multiplier = 0.5
 hand_offset = Vector3(0.55, -0.3, 0.05)
 attack_reach = 1.5
-slam_reach = 2.0
 
 [node name="Body" type="Node3D" parent="Player/Rig" unique_id=174431133]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
@@ -133,11 +129,11 @@ script = ExtResource("7_boodp")
 marker_scene = ExtResource("8_ulcth")
 
 [node name="Enemy2" parent="." unique_id=407984590 instance=ExtResource("1_ypt0w")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.2937775, 0.4736023, 0.16214848)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.7689285, 0.4736023, 7.417577)
 player_path = NodePath("../Player")
 
 [node name="Enemy4" parent="." unique_id=2091928486 instance=ExtResource("1_ypt0w")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.7427406, 0, -5.7884903)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.537857, 0, -7.803377)
 player_path = NodePath("../Player")
 
 [node name="FirstRoom" parent="." unique_id=602238273 instance=ExtResource("7_5o5w8")]

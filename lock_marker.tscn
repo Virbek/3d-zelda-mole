@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://b1mcdki1qpla6"]
+
+[sub_resource type="TorusMesh" id="TorusMesh_osq7l"]
+
+[node name="LockMarker" type="MeshInstance3D" unique_id=300954497]
+transform = Transform3D(0.36, 0, 0, 0, 0.1128238, 0, 0, 0, 0.36, 0, 0, 0)
+mesh = SubResource("TorusMesh_osq7l")

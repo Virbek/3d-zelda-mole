@@ -1,0 +1,88 @@
+[gd_scene format=3 uid="uid://bh07vh14y6ii"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_j4swo"]
+albedo_color = Color(0.186459, 0.18645903, 0.18645903, 1)
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_osq7l"]
+
+[node name="FirstRoom" type="Node3D" unique_id=602238273]
+
+[node name="solide" type="Node3D" parent="." unique_id=2020839268]
+
+[node name="Sol2" type="CSGBox3D" parent="solide" unique_id=659475230]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 53.72162, 1.2539439, -1.6025705)
+use_collision = true
+size = Vector3(51.588623, 0.5, 20.526367)
+
+[node name="Sol" type="CSGBox3D" parent="solide" unique_id=1029143961]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.2850952, -0.27081013, 0)
+use_collision = true
+size = Vector3(54.57019, 0.5, 50)
+
+[node name="Mur" type="Node3D" parent="solide" unique_id=1634616613]
+
+[node name="Mur" type="CSGBox3D" parent="solide/Mur" unique_id=380569249]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.7597656, 1.3563559, 34.77607)
+use_collision = true
+size = Vector3(57.52, 5, 20.777)
+
+[node name="Mur2" type="CSGBox3D" parent="solide/Mur" unique_id=829059287]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.041112, -34.21206)
+use_collision = true
+size = Vector3(50, 5, 19.876)
+
+[node name="Mur3" type="CSGBox3D" parent="solide/Mur" unique_id=1824711692]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, -40.617905, 1.9963808, 11.777257)
+use_collision = true
+size = Vector3(114.679, 5, 32.832)
+
+[node name="Mur4" type="CSGBox3D" parent="solide/Mur" unique_id=1976168076]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 58.603317, 1.356, 29.403133)
+use_collision = true
+size = Vector3(46.247, 5, 64.813)
+
+[node name="Mur5" type="CSGBox3D" parent="solide/Mur" unique_id=303848306]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 55.136227, 2.5698762, -22.099014)
+use_collision = true
+size = Vector3(25, 5, 56.465)
+
+[node name="Mur6" type="CSGBox3D" parent="solide/Mur" unique_id=575660110]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 103.486694, 2.5698762, -14.871557)
+use_collision = true
+size = Vector3(45.78357, 20, 57.27205)
+
+[node name="CSGPolygon3D" type="CSGPolygon3D" parent="solide" unique_id=720083760]
+transform = Transform3D(3.176835, 0, 0, 0, 1.6043247, 0, 0, 0, 23.8894, 24.894888, 0.002224207, 9.79067)
+autosmooth = true
+use_collision = true
+polygon = PackedVector2Array(0, 0, -0.00047445297, 0.016222188, 0.9944773, 0.98911345, 1, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=18511089]
+transform = Transform3D(50, 0, 0, 0, 50, 0, 0, 0, 50, 124.99491, 12.6418915, -34.3179)
+material_override = SubResource("StandardMaterial3D_j4swo")
+mesh = SubResource("PlaneMesh_osq7l")
+
+[node name="MeshInstance3D2" type="MeshInstance3D" parent="." unique_id=1738193544]
+transform = Transform3D(50, 0, 0, 0, 50, 0, 0, 0, 50, 76.47923, 4.520874, 56.667)
+material_override = SubResource("StandardMaterial3D_j4swo")
+mesh = SubResource("PlaneMesh_osq7l")
+
+[node name="MeshInstance3D5" type="MeshInstance3D" parent="." unique_id=1596495939]
+transform = Transform3D(50, 0, 0, 0, 50, 0, 0, 0, 50, -17.646729, 4.014328, 74.47787)
+material_override = SubResource("StandardMaterial3D_j4swo")
+mesh = SubResource("PlaneMesh_osq7l")
+
+[node name="MeshInstance3D6" type="MeshInstance3D" parent="." unique_id=1663947623]
+transform = Transform3D(50, 0, 0, 0, 50, 0, 0, 0, 50, -74.26046, 4.55632, 18.819939)
+material_override = SubResource("StandardMaterial3D_j4swo")
+mesh = SubResource("PlaneMesh_osq7l")
+
+[node name="MeshInstance3D3" type="MeshInstance3D" parent="." unique_id=1999867862]
+transform = Transform3D(50, 0, 0, 0, 50, 0, 0, 0, 50, 77.443794, 5.2325897, -59.843254)
+material_override = SubResource("StandardMaterial3D_j4swo")
+mesh = SubResource("PlaneMesh_osq7l")
+
+[node name="MeshInstance3D4" type="MeshInstance3D" parent="." unique_id=1611318131]
+transform = Transform3D(50, 0, 0, 0, 50, 0, 0, 0, 50, -17.489372, 5.1082, -74.68537)
+material_override = SubResource("StandardMaterial3D_j4swo")
+mesh = SubResource("PlaneMesh_osq7l")
