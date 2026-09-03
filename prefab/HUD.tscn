@@ -1,0 +1,42 @@
+[gd_scene format=3 uid="uid://3wg3lxf0um7l"]
+
+[ext_resource type="Shader" uid="uid://ddxq58qvuephy" path="res://Shader/vignette.gdshader" id="1_7e65j"]
+[ext_resource type="Script" uid="uid://bv1jw3tg87028" path="res://prefab/hud.gd" id="1_wufx6"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_co5ba"]
+shader = ExtResource("1_7e65j")
+shader_parameter/intensity = 0.0
+shader_parameter/softness = 0.55
+shader_parameter/tint = Color(0.5, 0, 0, 1)
+
+[node name="Hud" type="CanvasLayer" unique_id=1187038388]
+script = ExtResource("1_wufx6")
+
+[node name="Vignette" type="ColorRect" parent="." unique_id=177372266]
+material = SubResource("ShaderMaterial_co5ba")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="HealthBar" type="Control" parent="." unique_id=674020835]
+layout_mode = 3
+anchors_preset = 0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = 64.0
+offset_bottom = 64.0
+
+[node name="Back" type="ColorRect" parent="HealthBar" unique_id=1622692417]
+layout_mode = 0
+offset_right = 240.0
+offset_bottom = 18.0
+color = Color(0.2694199, 0.2694199, 0.2694199, 1)
+
+[node name="Fill" type="ColorRect" parent="HealthBar" unique_id=786708451]
+layout_mode = 0
+offset_right = 240.0
+offset_bottom = 18.0
+color = Color(0.40198824, 0.8754984, 7.70092e-07, 1)

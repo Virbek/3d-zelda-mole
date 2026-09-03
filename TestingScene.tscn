@@ -1,9 +1,9 @@
 [gd_scene format=3 uid="uid://u0qu6fw50sb6"]
 
+[ext_resource type="PackedScene" uid="uid://3wg3lxf0um7l" path="res://prefab/HUD.tscn" id="1_7hjm2"]
 [ext_resource type="Script" uid="uid://b07lnyprg4fw0" path="res://Script/camera_rig.gd" id="1_iyuba"]
 [ext_resource type="PackedScene" uid="uid://b34mk8qpxnm3e" path="res://prefab/Enemy.tscn" id="1_ypt0w"]
 [ext_resource type="Script" uid="uid://bn1pb4k3883he" path="res://Script/player/player.gd" id="2_6mnxl"]
-[ext_resource type="PackedScene" uid="uid://otfyx1hk6wag" path="res://prefab/HealthBar.tscn" id="2_7hjm2"]
 [ext_resource type="Script" uid="uid://b5w3j321nkicy" path="res://Script/player/rig.gd" id="3_6mnxl"]
 [ext_resource type="Script" uid="uid://d24fcjnhsun8w" path="res://Script/player/combat.gd" id="5_5gf4p"]
 
@@ -19,6 +19,8 @@ size = Vector3(1.9990234, 1, 1.9863281)
 [sub_resource type="Compositor" id="Compositor_an2lv"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_osq7l"]
+radius = 1.1254883
+height = 3.980713
 
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_j4swo"]
 
@@ -36,11 +38,16 @@ size = Vector3(1.9990234, 1, 1.9863281)
 
 [node name="Node3D" type="Node3D" unique_id=1847682603]
 
-[node name="Enemy" parent="." unique_id=465677058 instance=ExtResource("1_ypt0w")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 3.7087884)
+[node name="Enemy3" parent="." unique_id=810473897 instance=ExtResource("1_ypt0w")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13.547234, 0, 2.9114552)
+player_path = NodePath("../Player")
 
-[node name="Node3D" parent="Enemy" unique_id=661807815 instance=ExtResource("2_7hjm2")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.7, 0)
+[node name="Hud" parent="." unique_id=1187038388 instance=ExtResource("1_7hjm2")]
+player_path = NodePath("../Player")
+
+[node name="Enemy" parent="." unique_id=465677058 instance=ExtResource("1_ypt0w")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8.380175, 0, 3.7087884)
+player_path = NodePath("../Player")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1335146338]
 transform = Transform3D(0.81915206, 0.43938506, -0.36868784, 0, 0.64278764, 0.76604444, 0.57357645, -0.62750685, 0.5265408, 0, 0, 0)
@@ -75,7 +82,7 @@ size = 12.0
 script = ExtResource("2_6mnxl")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Player" unique_id=2015889366]
-transform = Transform3D(0.4, 0, 0, 0, 0.4, 0, 0, 0, 0.4, 0, 0.8, 0)
+transform = Transform3D(0.4, 0, 0, 0, 0.4, 0, 0, 0, 0.4, 0.0060014427, 0.45024416, 0.01980406)
 shape = SubResource("CapsuleShape3D_osq7l")
 
 [node name="Rig" type="Node3D" parent="Player" unique_id=2111491753]
@@ -83,7 +90,8 @@ script = ExtResource("3_6mnxl")
 player_path = NodePath("..")
 bob_height = 0.02
 sway_degrees = 2.0
-hand_offset = Vector3(0.55, 0.2, 0.05)
+dodge_lead_multiplier = 0.5
+hand_offset = Vector3(0.55, -0.3, 0.05)
 attack_reach = 1.5
 
 [node name="Body" type="Node3D" parent="Player/Rig" unique_id=174431133]
@@ -134,3 +142,11 @@ mesh = SubResource("BoxMesh_osq7l")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D" unique_id=531519449]
 shape = SubResource("BoxShape3D_osq7l")
+
+[node name="Enemy2" parent="." unique_id=407984590 instance=ExtResource("1_ypt0w")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.7689285, 0, 7.417577)
+player_path = NodePath("../Player")
+
+[node name="Enemy4" parent="." unique_id=2091928486 instance=ExtResource("1_ypt0w")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.537857, 0, 14.835154)
+player_path = NodePath("../Player")

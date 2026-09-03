@@ -13,7 +13,17 @@ extends CharacterBody3D
 @export var dodge_cooldown: float = 0.18
 @export var iframe_window := Vector2(0.05, 0.65)
 
+@export_group("Vie")
+@export var max_health: int = 5
+@export var hurt_iframes: float = 0.9
+@export var hurt_knockback: float = 7.0
+@export var blink_interval: float = 0.08
+
+signal health_changed(current: int, maximum: int)
+signal died
+
 var is_sprinting: bool = false
+@onready var rig: Node3D = $Rig
 
 const CAM_YAW := deg_to_rad(45.0)
 
@@ -23,8 +33,26 @@ var _dodge_t: float = 0.0
 var _dodge_dir := Vector3.ZERO
 var _dodge_cd: float = 0.0
 
+var health: int
+var _hurt_t: float = 0.0
+var _blink_t: float = 0.0
+var _dead := false
+
+func _ready() -> void:
+	health = max_health
+	health_changed.emit(health, max_health)
+
 func _physics_process(delta: float) -> void:
 	
+	if _hurt_t > 0.0:
+		_hurt_t = maxf(_hurt_t - delta, 0.0)
+		_blink_t -= delta
+		if _blink_t <= 0.0:
+			_blink_t = blink_interval
+			rig.visible = not rig.visible
+		if _hurt_t == 0.0:
+			rig.visible = true
+
 	if is_on_floor():
 		velocity.y = 0.0
 	else:
@@ -84,3 +112,38 @@ func _physics_process(delta: float) -> void:
 			is_dodging = false
 			is_invulnerable = false
 		return
+
+func take_damage(amount: int, direction: Vector3) -> void:
+	if _dead or is_invulnerable or _hurt_t > 0.0:
+		return
+
+	health = maxi(health - amount, 0)
+	health_changed.emit(health, max_health)
+
+	_hurt_t = hurt_iframes
+	velocity.x += direction.x * hurt_knockback
+	velocity.z += direction.z * hurt_knockback
+
+	# Retour visuel : secousse + vignette
+	var cam := get_viewport().get_camera_3d()
+	if cam != null and cam.get_parent().has_method("shake"):
+		HitStop.hit(0.09, 0.0)
+		cam.get_parent().shake(0.35)
+
+	if health <= 0:
+		_die()
+
+
+	
+func _die() -> void:
+	_dead = true
+	died.emit()
+	rig.visible = true
+	set_physics_process(false)
+
+	var cam := get_viewport().get_camera_3d()
+	if cam != null and cam.get_parent().has_method("shake"):
+		cam.get_parent().shake(0.9)
+
+	await get_tree().create_timer(1.2).timeout
+	get_tree().reload_current_scene()

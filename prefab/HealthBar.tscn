@@ -6,6 +6,7 @@
 transparency = 1
 shading_mode = 0
 albedo_color = Color(0.45424774, 0.45424774, 0.45424774, 1)
+billboard_keep_scale = true
 
 [sub_resource type="QuadMesh" id="QuadMesh_236am"]
 size = Vector2(0.7, 0.09)
@@ -17,6 +18,7 @@ center_offset = Vector3(0.35, 0, 0)
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_6g1eb"]
 render_priority = 1
 albedo_color = Color(1.259114, 0.5271128, 0.5271128, 1)
+billboard_keep_scale = true
 
 [node name="HealthBar" type="Node3D" unique_id=661807815]
 script = ExtResource("2_a4kts")
@@ -25,7 +27,9 @@ script = ExtResource("2_a4kts")
 material_override = SubResource("StandardMaterial3D_236am")
 mesh = SubResource("QuadMesh_236am")
 
-[node name="Fill" type="MeshInstance3D" parent="." unique_id=1631955621]
+[node name="FillPivot" type="Node3D" parent="." unique_id=23498348]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.35, 0, 0.002)
+
+[node name="Fill" type="MeshInstance3D" parent="FillPivot" unique_id=1631955621]
 mesh = SubResource("QuadMesh_6g1eb")
 surface_material_override/0 = SubResource("StandardMaterial3D_6g1eb")

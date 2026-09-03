@@ -2,7 +2,7 @@ extends Node
 
 @export var rig_path: NodePath
 @export_flags_3d_physics var hit_mask: int = 2
-
+@export var hit_stop_times: Array[float] = [0.05, 0.06, 0.11]
 @export_group("Timings")
 ## Durée de chaque coup du combo
 @export var durations: Array[float] = [0.26, 0.24, 0.42]
@@ -147,3 +147,4 @@ func _sphere_at(center: Vector3, radius: float) -> void:
 			dir.y = 0.0
 			if dir.length() > 0.01:
 				e.take_hit(dir.normalized())
+				HitStop.hit(hit_stop_times[_step - 1], 0.05)
