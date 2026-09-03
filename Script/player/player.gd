@@ -169,7 +169,11 @@ func take_damage(amount: int, direction: Vector3) -> void:
 	if health <= 0:
 		_die()
 
-
+func heal(amount: int) -> void:
+	if _dead:
+		return
+	health = mini(health + amount, max_health)
+	health_changed.emit(health, max_health)
 	
 func _die() -> void:
 	_dead = true
