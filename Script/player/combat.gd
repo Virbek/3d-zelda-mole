@@ -2,16 +2,22 @@ extends Node
 
 ## Logique de combat du joueur : combo 3 coups, attaque chargée avec dash.
 ##
-## Ce script ne dessine rien. Il pilote le rig via play_attack /
-## set_attack_progress / end_attack / play_charge / set_charge_progress /
-## end_charge / play_dash / set_dash_progress / end_dash, et lit
-## get_attack_position pour ses hitbox.
+## RÉPARTITION DES RÔLES :
+##   - les pieds portent le déplacement (capsule du Player, au sol)
+##   - le torse porte les dégâts subis   (HurtBox enfant de Body)
+##   - les poings portent les dégâts infligés (FistBox enfant de HandL/HandR)
+##
+## Les hitbox ne sont donc plus calculées : ce sont de vraies Area3D attachées
+## aux mains. Là où le poing se dessine, il frappe. Plus aucun risque que la
+## zone de dégâts et le visuel divergent.
 ##
 ## Le clic gauche est ambigu par nature : appui court = coup normal,
-## appui maintenu = charge. On ne peut donc pas déclencher l'attaque au
-## moment de l'appui — il faut attendre charge_delay pour trancher.
+## appui maintenu = charge. On ne peut pas déclencher l'attaque au moment
+## de l'appui — il faut attendre charge_delay pour trancher.
 
 @export var rig_path: NodePath
+@export var fist_box_l_path: NodePath
+@export var fist_box_r_path: NodePath
 
 @export_group("Combo")
 @export var durations: Array[float] = [0.26, 0.24, 0.42]
@@ -22,8 +28,6 @@ extends Node
 ]
 @export var chain_open: float = 0.35     ## à partir de quand on peut bufferiser
 @export var chain_grace: float = 0.25    ## fenêtre après un coup pour enchaîner
-@export var hit_radius: float = 0.55
-@export_flags_3d_physics var hit_mask: int = 2
 
 @export_group("Bond du finisher")
 @export var hop_force: float = 4.5
@@ -34,17 +38,16 @@ extends Node
 
 @export_group("Attaque chargée")
 @export var charge_delay: float = 0.15       ## maintien avant d'entrer en charge
-@export var charge_ramp_time: float = 0.18   ## doit correspondre au charge_windup du rig
+@export var charge_ramp_time: float = 0.18   ## doit valoir le charge_windup du rig
 @export var charge_min_time: float = 0.30    ## en dessous : simple coup normal
 @export var charge_max_time: float = 1.10    ## charge pleine
 
 @export_group("Dash chargé")
-@export var dash_distance_min: float = 5.0   ## portée à charge minimale
-@export var dash_distance_max: float = 10.0   ## portée à charge pleine
+@export var dash_distance_min: float = 2.0   ## portée à charge minimale
+@export var dash_distance_max: float = 4.5   ## portée à charge pleine
 @export var dash_speed_min: float = 15.0
 @export var dash_speed_max: float = 26.0
 @export var dash_max_time: float = 0.6       ## sécurité anti-blocage
-@export var dash_radius: float = 1.4
 @export var dash_damage: int = 3             ## dégâts à charge pleine
 @export var dash_shake: float = 0.5
 
@@ -54,6 +57,8 @@ extends Node
 
 @onready var player: CharacterBody3D = get_parent()
 @onready var rig: Node3D = get_node(rig_path)
+@onready var fist_l: Area3D = get_node(fist_box_l_path)
+@onready var fist_r: Area3D = get_node(fist_box_r_path)
 
 var is_charging: bool = false
 var is_dashing: bool = false
@@ -68,7 +73,6 @@ var _last_step: int = 0
 var _grace: float = 0.0
 var _buffered: bool = false
 var _hit_list: Array = []
-var _prev_pos: Array = []
 
 var _press_t: float = -1.0        ## -1 = aucun appui en attente
 var _press_step: int = 1          ## coup que l'appui déclenchera s'il est relâché
@@ -85,6 +89,10 @@ var _dash_dist: float = 0.0
 var is_attacking: bool:
 	get:
 		return _step != 0
+
+
+func _ready() -> void:
+	_set_fists(false, false)
 
 
 # ---------------------------------------------------------------- ENTRÉES
@@ -122,14 +130,26 @@ func _physics_process(delta: float) -> void:
 	if _step == 0:
 		return
 
-	var prev := _t
 	_t += delta / durations[_step - 1]
 	rig.set_attack_progress(minf(_t, 1.0))
 
-	_check_hits(prev, minf(_t, 1.0))
+	# --- Fenêtre de coup : on n'active les poings que sur cet intervalle ---
+	var w: Vector2 = hit_windows[_step - 1]
+	var open: bool = _t >= w.x and _t <= w.y
+
+	if _step == 3:
+		_set_fists(open, open)
+	elif _step == 1:
+		_set_fists(false, open)
+	else:
+		_set_fists(open, false)
+
+	if open:
+		_collect_hits()
 
 	if _t >= 1.0:
 		rig.end_attack()
+		_set_fists(false, false)
 		_step = 0
 		_t = 0.0
 		_grace = chain_grace
@@ -147,7 +167,6 @@ func _start(step: int) -> void:
 	_grace = 0.0
 	_buffered = false
 	_hit_list.clear()
-	_prev_pos.clear()
 	rig.play_attack(step)
 
 	if step == 3:
@@ -159,6 +178,46 @@ func _hop() -> void:
 	player.velocity.y = hop_force
 	player.velocity.x += fwd.x * hop_forward
 	player.velocity.z += fwd.z * hop_forward
+
+
+# ---------------------------------------------------------------- POINGS
+
+func _set_fists(left: bool, right: bool) -> void:
+	fist_l.monitoring = left
+	fist_r.monitoring = right
+
+
+## Lit ce que les poings touchent réellement. La liste évite qu'un même
+## ennemi encaisse plusieurs fois le même coup, frame après frame.
+func _collect_hits() -> void:
+	for fist in [fist_l, fist_r]:
+		if not fist.monitoring:
+			continue
+
+		for area in fist.get_overlapping_areas():
+			var e = area.get_parent()
+			if e == null or e in _hit_list:
+				continue
+			if not e.has_method("take_hit"):
+				continue
+
+			_hit_list.append(e)
+
+			var dir: Vector3 = e.global_position - player.global_position
+			dir.y = 0.0
+			if dir.length() > 0.01:
+				e.take_hit(dir.normalized())
+
+			_hit_stop()
+
+			var side: float = 1.0 if fist == fist_r else -1.0
+			rig.hit_impact(0.0 if _step == 3 else side)
+
+			# Le soin ne récompense que le finisher qui touche vraiment
+			if _step == 3 and not _healed_this_combo:
+				_healed_this_combo = true
+				if player.has_method("heal"):
+					player.heal(full_combo_heal)
 
 
 # ---------------------------------------------------------------- CHARGE
@@ -226,6 +285,7 @@ func _release_charge() -> void:
 	_dash_t = 0.0
 	is_dashing = true
 	_hit_list.clear()
+	_set_fists(false, true)   # seul le poing droit frappe pendant le dash
 
 	# Le poing vise un point fixe du monde : c'est là que le joueur s'arrêtera
 	rig.play_dash(_dash_power, _dash_start + _dash_dir * _dash_dist)
@@ -233,12 +293,12 @@ func _release_charge() -> void:
 
 func _process_dash(delta: float) -> void:
 	_dash_t += delta
-	var hit_something: bool = _dash_sweep()
+
 	var spd: float = lerpf(dash_speed_min, dash_speed_max, _dash_power)
 	player.velocity.x = _dash_dir.x * spd
 	player.velocity.z = _dash_dir.z * spd
 
-	_dash_sweep()
+	var hit_something: bool = _dash_hits()
 
 	# Le poing est synchronisé sur la distance parcourue, pas sur le temps :
 	# si le joueur percute un mur, le poing s'arrête pile là où il en est.
@@ -254,89 +314,30 @@ func _process_dash(delta: float) -> void:
 		player.velocity.x = 0.0
 		player.velocity.z = 0.0
 		is_dashing = false
+		_set_fists(false, false)
 		rig.end_dash()
 		_grace = chain_grace
 
 
-func _dash_sweep() -> bool:
-	var space := player.get_world_3d().direct_space_state
-
-	var shape := SphereShape3D.new()
-	shape.radius = dash_radius
-
-	var center: Vector3 = player.global_position + _dash_dir * 0.7 + Vector3.UP * 0.8
-
-	var params := PhysicsShapeQueryParameters3D.new()
-	params.shape = shape
-	params.transform = Transform3D(Basis(), center)
-	params.collision_mask = hit_mask
-	params.collide_with_areas = true
-	params.collide_with_bodies = false
-
+## Renvoie true si le poing a percuté un ennemi pendant le dash.
+func _dash_hits() -> bool:
 	var landed := false
 
-	for hit in space.intersect_shape(params, 8):
-		var e = hit.collider.get_parent()
-		if e in _hit_list:
+	for area in fist_r.get_overlapping_areas():
+		var e = area.get_parent()
+		if e == null or e in _hit_list:
 			continue
-		_hit_list.append(e)
-		if e.has_method("take_hit"):
-			var dmg: int = maxi(1, int(round(lerpf(1.0, float(dash_damage), _dash_power))))
-			e.take_hit(_dash_dir, dmg)
-			rig.hit_impact(1.0)
-			_hit_stop()
-			_shake(dash_shake * _dash_power)
-			landed = true
-
-	return landed
-
-# ---------------------------------------------------------------- DÉGÂTS
-
-func _check_hits(from_t: float, to_t: float) -> void:
-	var w: Vector2 = hit_windows[_step - 1]
-	if to_t < w.x or from_t > w.y:
-		return
-
-	var sides := [1.0, -1.0] if _step == 3 else [1.0 if _step == 1 else -1.0]
-
-	for side in sides:
-		var a: Vector3 = rig.get_attack_position(from_t, side)
-		var b: Vector3 = rig.get_attack_position(to_t, side)
-		if _sweep(a, b, side) and _step == 3 and not _healed_this_combo:
-			_healed_this_combo = true
-			if player.has_method("heal"):
-				player.heal(full_combo_heal)
-
-
-## Renvoie true si au moins un ennemi a été touché par ce balayage.
-func _sweep(from: Vector3, to: Vector3, side: float) -> bool:
-	var space := player.get_world_3d().direct_space_state
-
-	var shape := SphereShape3D.new()
-	shape.radius = hit_radius + from.distance_to(to) * 0.5
-
-	var params := PhysicsShapeQueryParameters3D.new()
-	params.shape = shape
-	params.transform = Transform3D(Basis(), (from + to) * 0.5)
-	params.collision_mask = hit_mask
-	params.collide_with_areas = true
-	params.collide_with_bodies = false
-
-	var landed := false
-
-	for hit in space.intersect_shape(params, 8):
-		var e = hit.collider.get_parent()
-		if e in _hit_list:
+		if not e.has_method("take_hit"):
 			continue
+
 		_hit_list.append(e)
-		if e.has_method("take_hit"):
-			var dir: Vector3 = e.global_position - player.global_position
-			dir.y = 0.0
-			if dir.length() > 0.01:
-				e.take_hit(dir.normalized())
-			landed = true
-			_hit_stop()
-			rig.hit_impact(0.0 if _step == 3 else side)
+
+		var dmg: int = maxi(1, int(round(lerpf(1.0, float(dash_damage), _dash_power))))
+		e.take_hit(_dash_dir, dmg)
+		rig.hit_impact(1.0)
+		_hit_stop()
+		_shake(dash_shake * _dash_power)
+		landed = true
 
 	return landed
 

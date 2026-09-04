@@ -6,6 +6,9 @@ extends CharacterBody3D
 ## Contrairement au chargeur, il ne prend PAS le jeton d'attaque : sinon
 ## un seul ennemi agirait à l'écran et les tireurs resteraient muets.
 ## Son télégraphe est plus long en compensation.
+##
+## Il vise la HurtBox du torse plutôt que la capsule du joueur : il tire donc
+## là où le joueur se voit, et les esquives deviennent lisibles.
 
 enum State { IDLE, REPOSITION, AIM, SHOOT, RECOVER, HURT, DEAD }
 
@@ -65,6 +68,7 @@ var _t: float = 0.0
 var _cooldown: float = 0.0
 var _knockback := Vector3.ZERO
 var _strafe_dir: float = 1.0
+var _player_hurt: Area3D = null
 
 var _mat: StandardMaterial3D
 var _base_color: Color
@@ -77,13 +81,18 @@ func _ready() -> void:
 	_base_scale = mesh.scale
 
 	_mat = mesh.get_active_material(0).duplicate()
-	mesh.set_surface_override_material(0, _mat)
+	mesh.material_override = _mat
 	_base_color = _mat.albedo_color
 
 	health_bar.set_ratio(1.0)
 	_strafe_dir = 1.0 if randf() > 0.5 else -1.0
 	# Décale les premiers tirs pour éviter les salves synchronisées
 	_cooldown = randf_range(0.0, shoot_cooldown)
+
+	# La zone de dégâts du joueur vit sur son torse, pas sur sa capsule
+	for n in get_tree().get_nodes_in_group("player_hurt"):
+		_player_hurt = n
+		break
 
 
 func _physics_process(delta: float) -> void:
@@ -213,14 +222,21 @@ func _apply_gravity(delta: float) -> void:
 
 # ---------------------------------------------------------------- OUTILS
 
+## Le point à viser : le torse s'il est disponible, la capsule sinon.
+func _aim_point() -> Vector3:
+	if _player_hurt != null and is_instance_valid(_player_hurt):
+		return _player_hurt.global_position
+	return player.global_position
+
+
 func _distance_to_player() -> float:
-	var v: Vector3 = player.global_position - global_position
+	var v: Vector3 = _aim_point() - global_position
 	v.y = 0.0
 	return v.length()
 
 
 func _dir_to_player() -> Vector3:
-	var v: Vector3 = player.global_position - global_position
+	var v: Vector3 = _aim_point() - global_position
 	v.y = 0.0
 	if v.length() < 0.01:
 		return -global_transform.basis.z
@@ -230,10 +246,10 @@ func _dir_to_player() -> Vector3:
 ## Vise légèrement devant le joueur s'il se déplace : un tir toujours
 ## parfaitement centré est trop facile à esquiver par simple strafe.
 func _aim_direction() -> Vector3:
-	var predicted: Vector3 = player.global_position
+	var predicted: Vector3 = _aim_point()
 	predicted += Vector3(player.velocity.x, 0.0, player.velocity.z) * lead_factor
 
-	var v: Vector3 = predicted - global_position
+	var v: Vector3 = predicted - (global_position + Vector3.UP * muzzle_height)
 	v.y = 0.0
 	if v.length() < 0.01:
 		return -global_transform.basis.z
@@ -257,6 +273,8 @@ func _start_aim() -> void:
 
 # ---------------------------------------------------------------- DÉGÂTS
 
+## damage a une valeur par défaut : les coups normaux appellent take_hit(dir),
+## le dash chargé passe ses propres dégâts.
 func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 	if state == State.DEAD:
 		return

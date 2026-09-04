@@ -7,7 +7,9 @@
 [ext_resource type="Script" uid="uid://b5w3j321nkicy" path="res://Script/player/rig.gd" id="3_6mnxl"]
 [ext_resource type="Script" uid="uid://d24fcjnhsun8w" path="res://Script/player/combat.gd" id="5_5gf4p"]
 [ext_resource type="PackedScene" uid="uid://bh07vh14y6ii" path="res://first_room.tscn" id="7_5o5w8"]
+[ext_resource type="Script" uid="uid://cve8pita2bcil" path="res://hurt_box.gd" id="7_35ann"]
 [ext_resource type="Script" uid="uid://dk1x1n0cr836v" path="res://lock_on.gd" id="7_boodp"]
+[ext_resource type="PackedScene" uid="uid://b6xdjmes871lx" path="res://Asset/Mole2.fbx" id="8_bdiev"]
 [ext_resource type="PackedScene" uid="uid://b1mcdki1qpla6" path="res://lock_marker.tscn" id="8_ulcth"]
 [ext_resource type="PackedScene" uid="uid://c732lgsxwdwcw" path="res://prefab/EnemyShooter.tscn" id="10_b7scd"]
 
@@ -21,14 +23,19 @@ size = Vector3(1.9990234, 1, 1.9863281)
 [sub_resource type="Compositor" id="Compositor_an2lv"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_osq7l"]
-radius = 0.82958984
-height = 3.7525635
+radius = 0.5201721
+height = 1.0403442
 
-[sub_resource type="CapsuleMesh" id="CapsuleMesh_j4swo"]
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_7nq31"]
+radius = 0.4
+height = 1.4
 
 [sub_resource type="SphereMesh" id="SphereMesh_osq7l"]
 
 [sub_resource type="SphereMesh" id="SphereMesh_6mnxl"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_7nq31"]
+radius = 0.4
 
 [sub_resource type="SphereMesh" id="SphereMesh_j4swo"]
 
@@ -40,7 +47,23 @@ height = 3.7525635
 player_path = NodePath("../Player")
 
 [node name="Enemy" parent="." unique_id=465677058 instance=ExtResource("1_ypt0w")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8.050418, -0.28609848, -4.1552916)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14.971999, -0.28609848, -7.7280784)
+player_path = NodePath("../Player")
+
+[node name="Enemy2" parent="." unique_id=810473897 instance=ExtResource("1_ypt0w")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.9566813, -0.28609848, -13.032711)
+player_path = NodePath("../Player")
+
+[node name="Enemy3" parent="." unique_id=2103315165 instance=ExtResource("1_ypt0w")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.9566813, -0.28609848, -5.463611)
+player_path = NodePath("../Player")
+
+[node name="Enemy5" parent="." unique_id=1119764140 instance=ExtResource("1_ypt0w")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10.948443, -0.28609848, 9.539047)
+player_path = NodePath("../Player")
+
+[node name="Enemy4" parent="." unique_id=1068992364 instance=ExtResource("1_ypt0w")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12.138778, -0.28609848, -5.463611)
 player_path = NodePath("../Player")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1335146338]
@@ -69,14 +92,26 @@ projection = 1
 size = 12.0
 
 [node name="Player" type="CharacterBody3D" parent="." unique_id=66199162]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 61.748955, 3.05968, -5.4082975)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 44.80537, 3.05968, -40.526962)
 script = ExtResource("2_6mnxl")
 sprint_speed = 12.0
 dodge_speed = 20.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Player" unique_id=2015889366]
-transform = Transform3D(0.4, 0, 0, 0, 0.4, 0, 0, 0, 0.4, 0.006000519, 0.49587417, 0.019804)
+transform = Transform3D(0.4, 0, 0, 0, 0.4, 0, 0, 0, 0.4, 0.006000519, -0.046569824, 0.019804)
 shape = SubResource("CapsuleShape3D_osq7l")
+
+[node name="Combat" type="Node3D" parent="Player" unique_id=1908521376]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -4.7683716e-07)
+script = ExtResource("5_5gf4p")
+rig_path = NodePath("../Rig")
+fist_box_l_path = NodePath("../Rig/HandL/FistBox")
+fist_box_r_path = NodePath("../Rig/HandR/FistBox")
+durations = Array[float]([0.3, 0.3, 0.75])
+hit_windows = Array[Vector2]([Vector2(0.05, 0.95), Vector2(0.05, 0.95), Vector2(0.45, 0.8)])
+dash_distance_min = 3.0
+dash_distance_max = 5.0
+dash_damage = 1
 
 [node name="Rig" type="Node3D" parent="Player" unique_id=2111491753]
 script = ExtResource("3_6mnxl")
@@ -88,15 +123,24 @@ dodge_lead_multiplier = 0.5
 hand_offset = Vector3(0.55, -0.3, 0.05)
 attack_reach = 1.5
 slam_reach = 2.0
-dash_feet_catch = 5.0
+dash_feet_catch = 2.5
+impact_hold = 0.05
 impact_recoil = 0.0
 
 [node name="Body" type="Node3D" parent="Player/Rig" unique_id=174431133]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
 
-[node name="MeshInstance3d" type="MeshInstance3D" parent="Player/Rig/Body" unique_id=764181704]
-transform = Transform3D(0.7, 0, 0, 0, 0.7, 0, 0, 0, 0.7, 0, 0, 0)
-mesh = SubResource("CapsuleMesh_j4swo")
+[node name="HurtBox" type="Area3D" parent="Player/Rig/Body" unique_id=23720775]
+collision_layer = 4
+collision_mask = 0
+script = ExtResource("7_35ann")
+player_path = NodePath("../../..")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player/Rig/Body/HurtBox" unique_id=567959405]
+shape = SubResource("CapsuleShape3D_7nq31")
+
+[node name="Mole2" parent="Player/Rig/Body" unique_id=1554803901 instance=ExtResource("8_bdiev")]
+transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0, -0.6847949, 0)
 
 [node name="FootL" type="Node3D" parent="Player/Rig" unique_id=1650901690]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, 0)
@@ -114,6 +158,15 @@ mesh = SubResource("SphereMesh_6mnxl")
 
 [node name="HandR" type="Node3D" parent="Player/Rig" unique_id=1827813119]
 
+[node name="FistBox" type="Area3D" parent="Player/Rig/HandR" unique_id=1558288469]
+collision_layer = 0
+collision_mask = 2
+monitoring = false
+monitorable = false
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player/Rig/HandR/FistBox" unique_id=951262436]
+shape = SubResource("SphereShape3D_7nq31")
+
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Player/Rig/HandR" unique_id=1135453900]
 transform = Transform3D(0.4, 0, 0, 0, 0.4, 0, 0, 0, 0.4, 0, 0, 0)
 mesh = SubResource("SphereMesh_j4swo")
@@ -124,25 +177,33 @@ mesh = SubResource("SphereMesh_j4swo")
 transform = Transform3D(0.4, 0, 0, 0, 0.4, 0, 0, 0, 0.4, 0, 0, 0)
 mesh = SubResource("SphereMesh_an2lv")
 
-[node name="Combat" type="Node3D" parent="Player" unique_id=1908521376]
-script = ExtResource("5_5gf4p")
-rig_path = NodePath("../Rig")
-durations = Array[float]([0.3, 0.3, 0.75])
-hit_windows = Array[Vector2]([Vector2(0.05, 0.95), Vector2(0.05, 0.95), Vector2(0.45, 0.8)])
-hit_radius = 0.75
-dash_damage = 1
+[node name="FistBox" type="Area3D" parent="Player/Rig/HandL" unique_id=629660424]
+collision_layer = 0
+collision_mask = 2
+monitoring = false
+monitorable = false
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player/Rig/HandL/FistBox" unique_id=881411156]
+shape = SubResource("SphereShape3D_7nq31")
 
 [node name="LockOn" type="Node" parent="Player" unique_id=594477736]
 script = ExtResource("7_boodp")
 marker_scene = ExtResource("8_ulcth")
 
-[node name="Enemy2" parent="." unique_id=407984590 instance=ExtResource("1_ypt0w")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.2937775, 0.4736023, 0.16214848)
-player_path = NodePath("../Player")
-
 [node name="FirstRoom" parent="." unique_id=602238273 instance=ExtResource("7_5o5w8")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.08057976, 0, -0.06272125)
+transform = Transform3D(0.79073244, 0, 0.61216193, 0, 1, 0, -0.61216193, 0, 0.79073244, -0.25634575, -0.2726035, 0.32142687)
 
-[node name="EnemyShooter" parent="." unique_id=810473897 instance=ExtResource("10_b7scd")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.320816, 0.39999843, -5.897889)
+[node name="EnemyShooter" parent="." unique_id=607059991 instance=ExtResource("10_b7scd")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.0798712, 0.39999843, -21.78691)
 player_path = NodePath("../Player")
+shoot_cooldown = 1.0
+
+[node name="EnemyShooter2" parent="." unique_id=1601124618 instance=ExtResource("10_b7scd")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.05924797, 0.39999843, 5.9635067)
+player_path = NodePath("../Player")
+shoot_cooldown = 1.0
+
+[node name="EnemyShooter3" parent="." unique_id=506173355 instance=ExtResource("10_b7scd")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.05924797, 0.39999843, 14.989328)
+player_path = NodePath("../Player")
+shoot_cooldown = 1.0

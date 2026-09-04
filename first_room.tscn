@@ -37,12 +37,52 @@ use_collision = true
 size = Vector3(114.679, 5, 32.832)
 
 [node name="Mur4" type="CSGBox3D" parent="solide/Mur" unique_id=1976168076]
-transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 58.603317, 1.356, 29.403133)
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 58.603317, 1.356, 22.196926)
 use_collision = true
 size = Vector3(46.247, 5, 64.813)
 
+[node name="Mur7" type="CSGBox3D" parent="solide/Mur" unique_id=1592715812]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 30.342648, 1.4868593, -0.30490115)
+use_collision = true
+size = Vector3(0.42051506, 4.7382813, 43.119267)
+
+[node name="Mur12" type="CSGBox3D" parent="solide/Mur" unique_id=657321857]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, -3.5798616, 1.4868593, -0.30490187)
+use_collision = true
+size = Vector3(0.42051506, 4.7382813, 9.273378)
+
+[node name="Mur13" type="CSGBox3D" parent="solide/Mur" unique_id=1773470509]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, -19.826113, 1.4868593, -0.30490187)
+use_collision = true
+size = Vector3(0.42051506, 4.7382813, 9.845341)
+
+[node name="Mur8" type="CSGBox3D" parent="solide/Mur" unique_id=78930466]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 9.057332, 1.3472109, -9.764241)
+use_collision = true
+size = Vector3(19.153303, 4.982422, 0.5330219)
+
+[node name="Mur14" type="CSGBox3D" parent="solide/Mur" unique_id=191248520]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 9.057332, 1.3472109, 9.1787)
+use_collision = true
+size = Vector3(19.153303, 4.982422, 0.5330219)
+
+[node name="Mur11" type="CSGBox3D" parent="solide/Mur" unique_id=475187121]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0.8190031, 1.3472109, -9.764241)
+use_collision = true
+size = Vector3(19.153303, 4.982422, 0.5330219)
+
+[node name="Mur10" type="CSGBox3D" parent="solide/Mur" unique_id=1294482909]
+transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, -0.24327469, 1.7726378, -19.051292)
+use_collision = true
+size = Vector3(19.153303, 4.076172, 0.5330219)
+
+[node name="Mur9" type="CSGBox3D" parent="solide/Mur" unique_id=593237548]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 9.057332, 1.3472109, -9.764241)
+use_collision = true
+size = Vector3(19.153303, 4.982422, 0.5330219)
+
 [node name="Mur5" type="CSGBox3D" parent="solide/Mur" unique_id=303848306]
-transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 55.136227, 2.5698762, -22.099014)
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 53.389034, 2.5698762, -22.099014)
 use_collision = true
 size = Vector3(25, 5, 56.465)
 
@@ -52,7 +92,7 @@ use_collision = true
 size = Vector3(45.78357, 20, 57.27205)
 
 [node name="CSGPolygon3D" type="CSGPolygon3D" parent="solide" unique_id=720083760]
-transform = Transform3D(3.176835, 0, 0, 0, 1.6043247, 0, 0, 0, 23.8894, 24.894888, 0.002224207, 9.79067)
+transform = Transform3D(3.176835, 0, 0, 0, 1.6043247, 0, 0, 0, 8.710613, 24.75, -0.058, -0.9169307)
 autosmooth = true
 use_collision = true
 polygon = PackedVector2Array(0, 0, -0.00047445297, 0.016222188, 0.9944773, 0.98911345, 1, 0)
@@ -63,7 +103,7 @@ material_override = SubResource("StandardMaterial3D_j4swo")
 mesh = SubResource("PlaneMesh_osq7l")
 
 [node name="MeshInstance3D2" type="MeshInstance3D" parent="." unique_id=1738193544]
-transform = Transform3D(50, 0, 0, 0, 50, 0, 0, 0, 50, 76.47923, 4.520874, 56.667)
+transform = Transform3D(50, 0, 0, 0, 50, 0, 0, 0, 50, 76.47923, 4.520874, 49.2555)
 material_override = SubResource("StandardMaterial3D_j4swo")
 mesh = SubResource("PlaneMesh_osq7l")
 

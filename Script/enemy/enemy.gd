@@ -6,6 +6,10 @@ extends CharacterBody3D
 ## Le télégraphe est le cœur du design : c'est lui qui rend la charge esquivable.
 ## Ne le raccourcis pas sous ~0.5s sans raison, le joueur n'aurait plus le temps
 ## de lire l'attaque.
+##
+## Il se déplace vers la capsule du joueur (stable) mais frappe sa HurtBox de
+## torse (Area3D du groupe "player_hurt"). Viser le torse pour la navigation
+## le ferait zigzaguer, puisque le buste oscille à chaque pas.
 
 enum State { IDLE, CHASE, TELEGRAPH, CHARGE, RECOVER, HURT, DEAD }
 
@@ -37,6 +41,11 @@ signal died
 @export var charge_damage: int = 1
 @export var charge_cooldown: float = 1.2
 
+@export_group("Encerclement")
+@export var circle_distance: float = 4.5
+@export var circle_speed: float = 2.2
+@export var circle_dir: float = 1.0        ## 1 ou -1, tiré au sort au démarrage
+
 @export_group("Recul")
 @export var knockback_force: float = 9.0
 @export var knockback_damping: float = 8.0
@@ -52,9 +61,6 @@ signal died
 @export var death_time: float = 0.45
 @export var death_launch: float = 1.6
 
-var _aggro: bool = false
-var _lose_t: float = 0.0
-
 @onready var player: CharacterBody3D = get_node(player_path)
 @onready var mesh: MeshInstance3D = $MeshInstance3D
 @onready var health_bar: Node3D = $HealthBar
@@ -64,37 +70,21 @@ var _lose_t: float = 0.0
 var state: State = State.IDLE
 var health: int
 
+var _aggro: bool = false
+var _lose_t: float = 0.0
+
 var _t: float = 0.0                  ## temps passé dans l'état courant
 var _cooldown: float = 0.0
 var _charge_dir := Vector3.ZERO
+var _charge_start := Vector3.ZERO
 var _knockback := Vector3.ZERO
-var _hit_player := false  
-var _charge_start := Vector3.ZERO           ## un seul dégât par charge
+var _hit_player := false             ## un seul dégât par charge
 
 var _mat: StandardMaterial3D
 var _base_color: Color
 var _base_scale := Vector3.ONE
 var _flash_tween: Tween
 var _tele_tween: Tween
-
-@export_group("Encerclement")
-@export var circle_distance: float = 4.5
-@export var circle_speed: float = 2.2
-@export var circle_dir: float = 1.0   ## 1 ou -1, à varier entre ennemis
-
-
-func _circle(delta: float, d: float) -> void:
-	var to_player: Vector3 = _dir_to_player()
-	var tangent: Vector3 = to_player.cross(Vector3.UP) * circle_dir
-
-	# Maintient la distance tout en tournant
-	var radial: float = (d - circle_distance) * 0.8
-	var move: Vector3 = tangent + to_player * radial
-	move = move.normalized()
-
-	velocity.x = move.x * circle_speed
-	velocity.z = move.z * circle_speed
-	_face(to_player, delta)
 
 
 func _ready() -> void:
@@ -179,6 +169,22 @@ func _chase(delta: float) -> void:
 	velocity.z = dir.z * chase_speed
 	_face(dir, delta)
 
+
+## Tourne autour du joueur en gardant ses distances, en attendant son tour.
+func _circle(delta: float, d: float) -> void:
+	var to_player: Vector3 = _dir_to_player()
+	var tangent: Vector3 = to_player.cross(Vector3.UP) * circle_dir
+
+	# Maintient la distance tout en tournant
+	var radial: float = (d - circle_distance) * 0.8
+	var move: Vector3 = tangent + to_player * radial
+	move = move.normalized()
+
+	velocity.x = move.x * circle_speed
+	velocity.z = move.z * circle_speed
+	_face(to_player, delta)
+
+
 func _telegraph(delta: float) -> void:
 	velocity.x = 0.0
 	velocity.z = 0.0
@@ -219,10 +225,15 @@ func _charge(_delta: float) -> void:
 	var blocked: bool = get_slide_collision_count() > 0 and _t > 0.05
 
 	if travelled >= charge_distance or blocked or _t >= charge_max_time:
+		# Choc contre un mur ou un autre ennemi : arrêt net, pas de glissade
+		if blocked:
+			velocity.x = 0.0
+			velocity.z = 0.0
 		attack_box.monitoring = false
 		AttackToken.release(self)
 		_cooldown = charge_cooldown
 		_set_state(State.RECOVER)
+
 
 func _recover(delta: float) -> void:
 	# Décélération : il finit sa glissade, vulnérable
@@ -280,24 +291,32 @@ func _start_telegraph() -> void:
 	_tele_tween.tween_property(_mat, "albedo_color", _base_color, telegraph_time * 0.3)
 
 
-## Le joueur se prend la charge ?
+## Le joueur se prend la charge ? On cherche sa HurtBox de torse, pas sa
+## capsule : c'est le buste visible qui encaisse.
+## _hit_player garantit un seul dégât par charge, sans quoi un ennemi qui
+## traverse le joueur lui inflige des dégâts à chaque frame de contact.
 func _check_charge_hit() -> void:
 	if _hit_player:
 		return
-	for body in attack_box.get_overlapping_bodies():
-		if body != player:
+
+	for area in attack_box.get_overlapping_areas():
+		if not area.is_in_group("player_hurt"):
 			continue
+		if not area.has_method("take_damage"):
+			continue
+
+		var dir: Vector3 = area.global_position - global_position
+		dir.y = 0.0
+		if dir.length() > 0.01:
+			area.take_damage(charge_damage, dir.normalized())
 		_hit_player = true
-		if "is_invulnerable" in player and player.is_invulnerable:
-			return
-		if player.has_method("take_damage"):
-			var dir: Vector3 = player.global_position - global_position
-			dir.y = 0.0
-			player.take_damage(charge_damage, dir.normalized())
 		return
 
 
 # ---------------------------------------------------------------- DÉGÂTS
+
+## damage a une valeur par défaut : les coups normaux appellent take_hit(dir),
+## le dash chargé passe ses propres dégâts.
 func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 	if state == State.DEAD:
 		return
@@ -342,6 +361,7 @@ func _die(direction: Vector3) -> void:
 	set_collision_layer_value(1, false)
 	health_bar.visible = false
 	velocity = Vector3.ZERO
+	AttackToken.release(self)
 
 	if _flash_tween != null and _flash_tween.is_running():
 		_flash_tween.kill()
@@ -357,6 +377,6 @@ func _die(direction: Vector3) -> void:
 	d.tween_property(mesh, "scale", Vector3(1.3, 0.05, 1.3), death_time)\
 		.set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_BACK)
 	d.tween_property(_mat, "albedo_color:a", 0.0, death_time)
-	AttackToken.release(self)
+
 	await d.finished
 	queue_free()

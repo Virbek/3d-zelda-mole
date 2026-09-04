@@ -1,11 +1,14 @@
 extends Area3D
 
-## Projectile en ligne droite. Se détruit au contact du joueur, d'un mur,
-## ou après expiration de sa durée de vie.
+## Projectile en ligne droite. Se détruit au contact de la zone de dégâts
+## du joueur, d'un mur, ou après expiration de sa durée de vie.
 ##
 ## Il traverse volontairement les autres ennemis : sinon un tireur placé
 ## derrière un chargeur ne pourrait jamais toucher, ce qui rend son
 ## comportement illisible pour le joueur.
+##
+## Le joueur n'est plus touché via sa capsule mais via la HurtBox portée par
+## son torse : c'est le buste visible qui encaisse, pas les pieds.
 
 @export var speed: float = 9.0
 @export var damage: int = 1
@@ -24,6 +27,7 @@ var _dead: bool = false
 
 func _ready() -> void:
 	body_entered.connect(_on_body_entered)
+	area_entered.connect(_on_area_entered)
 
 
 func _physics_process(delta: float) -> void:
@@ -39,6 +43,21 @@ func _physics_process(delta: float) -> void:
 	mesh.rotate_y(spin_speed * delta)
 
 
+## Zones : c'est ici que le joueur se fait toucher.
+func _on_area_entered(area: Area3D) -> void:
+	if _dead or not area.is_in_group("player_hurt"):
+		return
+
+	if area.has_method("take_damage"):
+		var dir: Vector3 = area.global_position - global_position
+		dir.y = 0.0
+		if dir.length() > 0.01:
+			area.take_damage(damage, dir.normalized())
+
+	_pop()
+
+
+## Corps : uniquement le décor. Le projectile s'écrase sur les murs.
 func _on_body_entered(body: Node3D) -> void:
 	if _dead or body == shooter:
 		return
@@ -47,12 +66,11 @@ func _on_body_entered(body: Node3D) -> void:
 	if body.has_method("take_hit"):
 		return
 
+	# La capsule du joueur ne prend plus de dégâts : elle ne sert qu'au
+	# déplacement. On la laisse passer pour ne pas absorber le tir devant
+	# le torse, qui est la vraie cible.
 	if body.has_method("take_damage"):
-		if not ("is_invulnerable" in body and body.is_invulnerable):
-			var dir: Vector3 = body.global_position - global_position
-			dir.y = 0.0
-			if dir.length() > 0.01:
-				body.take_damage(damage, dir.normalized())
+		return
 
 	_pop()
 

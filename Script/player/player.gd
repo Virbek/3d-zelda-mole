@@ -11,6 +11,8 @@ extends CharacterBody3D
 @export var lock_turn_speed: float = 12.0
 
 @export_group("Esquive")
+@export var iframe_start: float = 0.05    ## délai avant que l'invincibilité s'active
+@export var iframe_duration: float = 0.25 ## durée de l'invincibilité
 @export var dodge_speed: float = 16.0
 @export var dodge_duration: float = 0.26
 @export var dodge_cooldown: float = 0.18
@@ -35,6 +37,7 @@ var is_invulnerable: bool = false
 var _dodge_t: float = 0.0
 var _dodge_dir := Vector3.ZERO
 var _dodge_cd: float = 0.0
+var _iframe_t: float = 0.0
 
 
 var health: int
@@ -74,6 +77,8 @@ func _physics_process(delta: float) -> void:
 
 	if Input.is_action_just_pressed("dodge") and not is_dodging and _dodge_cd <= 0.0:
 		is_dodging = true
+		_iframe_t = 0.0
+		is_invulnerable = false
 		_dodge_t = 0.0
 		_dodge_cd = dodge_duration + dodge_cooldown
 		# Sans input directionnel : pas en arrière
@@ -85,7 +90,9 @@ func _physics_process(delta: float) -> void:
 	# --- Esquive : exécution (court-circuite le déplacement normal) ---
 	if is_dodging:
 		_dodge_t += delta / dodge_duration
-		is_invulnerable = _dodge_t >= iframe_window.x and _dodge_t <= iframe_window.y
+		_iframe_t += delta
+		is_invulnerable = _iframe_t >= iframe_start \
+			and _iframe_t < iframe_start + iframe_duration
 
 		# Tient la vitesse puis coupe net
 		var e: float = 1.0 - pow(_dodge_t, 3.0)
@@ -107,6 +114,8 @@ func _physics_process(delta: float) -> void:
 			is_dodging = false
 			is_invulnerable = false
 		return
+	else:
+		is_invulnerable = false
 
 	# --- Sprint ---
 	is_sprinting = Input.is_action_pressed("sprint") and direction.length_squared() > 0.01
