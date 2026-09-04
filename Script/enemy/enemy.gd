@@ -298,12 +298,11 @@ func _check_charge_hit() -> void:
 
 
 # ---------------------------------------------------------------- DÉGÂTS
-
-func take_hit(direction: Vector3) -> void:
+func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 	if state == State.DEAD:
 		return
 
-	health -= damage_per_hit
+	health -= damage
 	health_bar.set_ratio(float(health) / float(max_health))
 
 	if health <= 0:

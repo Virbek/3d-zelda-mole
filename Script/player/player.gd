@@ -60,6 +60,10 @@ func _physics_process(delta: float) -> void:
 		if _hurt_t == 0.0:
 			rig.visible = true
 
+	if combat.is_dashing:
+		move_and_slide()
+		return
+
 	# --- Entrées, converties dans le repère de la caméra ---
 	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var direction := Vector3(input.x, 0.0, input.y).rotated(Vector3.UP, CAM_YAW)
@@ -115,6 +119,8 @@ func _physics_process(delta: float) -> void:
 	if combat.is_attacking:
 		is_sprinting = false
 		target_vel = Vector3.ZERO
+	if combat.is_charging:
+		target_vel *= 0.25
 
 	# En l'air, on laisse filer : le bond du coup 3 ne doit pas être écrasé
 	if is_on_floor():

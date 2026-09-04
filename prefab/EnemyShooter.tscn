@@ -1,10 +1,11 @@
-[gd_scene format=3 uid="uid://b34mk8qpxnm3e"]
+[gd_scene format=3 uid="uid://c732lgsxwdwcw"]
 
-[ext_resource type="Script" uid="uid://c3ttsl24yvlx1" path="res://Script/enemy/enemy.gd" id="1_tt7e2"]
-[ext_resource type="PackedScene" uid="uid://otfyx1hk6wag" path="res://prefab/HealthBar.tscn" id="2_e3gy8"]
+[ext_resource type="Script" uid="uid://b0ndfe22ovd07" path="res://Script/enemy/enemy_shooter.gd" id="1_4okwo"]
+[ext_resource type="PackedScene" uid="uid://otfyx1hk6wag" path="res://prefab/HealthBar.tscn" id="2_4okwo"]
+[ext_resource type="PackedScene" uid="uid://bq27fh8g3khdi" path="res://prefab/projectile.tscn" id="2_lwyqm"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_5gf4p"]
-albedo_color = Color(0.47866166, 0.47866172, 0.47866166, 1)
+albedo_color = Color(0.30761838, 0.54780513, 0.25590456, 1)
 
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_j4swo"]
 
@@ -14,13 +15,11 @@ albedo_color = Color(0.47866166, 0.47866172, 0.47866166, 1)
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_kef0k"]
 
-[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_an2lv"]
-radius = 0.6
+[node name="EnemyShooter" type="CharacterBody3D" unique_id=810473897]
+script = ExtResource("1_4okwo")
+projectile_scene = ExtResource("2_lwyqm")
 
-[node name="Enemy" type="CharacterBody3D" unique_id=810473897]
-script = ExtResource("1_tt7e2")
-
-[node name="HealthBar" parent="." unique_id=661807815 instance=ExtResource("2_e3gy8")]
+[node name="HealthBar" parent="." unique_id=661807815 instance=ExtResource("2_4okwo")]
 transform = Transform3D(1.5, 0, 0, 0, 1.5, 0, 0, 0, 1.5, 0, 1.9371288, 0)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=643444699]
@@ -38,12 +37,4 @@ collision_layer = 2
 collision_mask = 0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="HurtBox" unique_id=840996368]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6468748, 0)
 shape = SubResource("CapsuleShape3D_kef0k")
-
-[node name="AttackBox" type="Area3D" parent="." unique_id=1781769692]
-collision_layer = 0
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="AttackBox" unique_id=1922697872]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, -0.002523303)
-shape = SubResource("CapsuleShape3D_an2lv")

@@ -1,0 +1,27 @@
+[gd_scene format=3 uid="uid://bq27fh8g3khdi"]
+
+[ext_resource type="Script" uid="uid://co8dub6mnovde" path="res://prefab/projectile.gd" id="1_7q0br"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_n2ty5"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(1, 1, 0.6204995, 1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_osq7l"]
+material = SubResource("StandardMaterial3D_n2ty5")
+radius = 0.18
+height = 0.36
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_osq7l"]
+radius = 0.18
+
+[node name="Projectile" type="Area3D" unique_id=611504758]
+collision_layer = 0
+monitorable = false
+script = ExtResource("1_7q0br")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1097084816]
+mesh = SubResource("SphereMesh_osq7l")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1644768979]
+shape = SubResource("SphereShape3D_osq7l")

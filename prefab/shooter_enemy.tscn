@@ -1,0 +1,21 @@
+[gd_scene format=3 uid="uid://c7q2gc7gauxlo"]
+
+[ext_resource type="PackedScene" uid="uid://otfyx1hk6wag" path="res://prefab/HealthBar.tscn" id="1_r0g0a"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_j4swo"]
+albedo_color = Color(6.8345666e-06, 0.6845311, 0.24687347, 1)
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_osq7l"]
+material = SubResource("StandardMaterial3D_j4swo")
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_osq7l"]
+
+[node name="ShooterEnemy" type="CharacterBody3D" unique_id=341252217]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=406677169]
+mesh = SubResource("CapsuleMesh_osq7l")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1873882851]
+shape = SubResource("CapsuleShape3D_osq7l")
+
+[node name="HealthBar" parent="." unique_id=661807815 instance=ExtResource("1_r0g0a")]

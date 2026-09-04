@@ -14,34 +14,52 @@ extends Node3D
 @export var shake_amount: float = 0.5
 @export var shake_speed: float = 28.0
 
+@export_group("Ciblage")
+@export var lock_focus_weight: float = 0.35    ## 0 = full joueur, 1 = full cible
+@export var lock_smoothing_boost: float = 1.4
+@export var size_lock_bonus: float = 1.5       ## léger dézoom quand une cible est verrouillée
+
 @onready var cam: Camera3D = $Camera3D
-@export var lock_focus_weight: float = 0.35   # 0 = full joueur, 1 = full cible
-@export var lock_smoothing_boost: float = 1.4 # légèrement plus réactive en combat
-
-@onready var lock_on: Node = target.get_node_or_null("LockOn")
-
 
 var _shake: float = 0.0
 var _shake_time: float = 0.0
+
+var lock_on: Node = null
+
+
+func _ready() -> void:
+	if target != null:
+		lock_on = target.get_node_or_null("LockOn")
+	if lock_on == null:
+		push_warning("CameraRig : LockOn introuvable sous le target")
+
 
 func _physics_process(delta: float) -> void:
 	if target == null:
 		return
 
-	var focus_point: Vector3 = target.global_position
+	# --- Point visé : le joueur, ou un point entre joueur et cible si lock actif ---
+	var focus: Vector3 = target.global_position + Vector3.UP * height_offset
 	var speed := smoothing
+	var locked := false
 
 	if lock_on != null and lock_on.target != null and is_instance_valid(lock_on.target):
-		focus_point = target.global_position.lerp(lock_on.target.global_position, lock_focus_weight)
+		locked = true
+		var enemy_point: Vector3 = lock_on.target.global_position + Vector3.UP * height_offset
+		focus = focus.lerp(enemy_point, lock_focus_weight)
 		speed = smoothing * lock_smoothing_boost
 
 	var t := 1.0 - exp(-speed * delta)
-	global_position = global_position.lerp(focus_point, t)
+	global_position = global_position.lerp(focus, t)
 
+	# --- Zoom ---
 	var wanted: float = size_sprint if target.is_sprinting else size_normal
+	if locked:
+		wanted += size_lock_bonus
 	var zt := 1.0 - exp(-zoom_smoothing * delta)
 	cam.size = lerp(cam.size, wanted, zt)
 
+	# --- Secousse ---
 	if _shake > 0.0:
 		_shake = maxf(_shake - shake_decay * delta * _shake, 0.0)
 		_shake_time += delta * shake_speed
@@ -51,6 +69,7 @@ func _physics_process(delta: float) -> void:
 	else:
 		cam.position.x = 0.0
 		cam.position.y = 0.0
+
 
 func shake(strength: float) -> void:
 	_shake = maxf(_shake, strength)
