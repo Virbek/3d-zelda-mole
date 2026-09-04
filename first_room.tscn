@@ -27,9 +27,9 @@ use_collision = true
 size = Vector3(57.52, 5, 20.777)
 
 [node name="Mur2" type="CSGBox3D" parent="solide/Mur" unique_id=829059287]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.041112, -34.21206)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.4592628, 2.041112, -34.21206)
 use_collision = true
-size = Vector3(50, 5, 19.876)
+size = Vector3(53.43799, 5, 19.876)
 
 [node name="Mur3" type="CSGBox3D" parent="solide/Mur" unique_id=1824711692]
 transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, -40.617905, 1.9963808, 11.777257)
@@ -73,7 +73,7 @@ material_override = SubResource("StandardMaterial3D_j4swo")
 mesh = SubResource("PlaneMesh_osq7l")
 
 [node name="MeshInstance3D6" type="MeshInstance3D" parent="." unique_id=1663947623]
-transform = Transform3D(50, 0, 0, 0, 50, 0, 0, 0, 50, -74.26046, 4.55632, 18.819939)
+transform = Transform3D(50, 0, 0, 0, 50, 0, 0, 0, 50, -74.26046, 4.556324, 18.819939)
 material_override = SubResource("StandardMaterial3D_j4swo")
 mesh = SubResource("PlaneMesh_osq7l")
 

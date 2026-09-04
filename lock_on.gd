@@ -30,30 +30,46 @@ func _unhandled_input(event: InputEvent) -> void:
 		_clear()
 	else:
 		var t := _find_best()
-		print("cible retenue: ", t)
 		if t != null:
 			target = t
-			if t.has_signal("died"):
+			if t.has_signal("died") and not t.died.is_connected(_clear):
 				t.died.connect(_clear, CONNECT_ONE_SHOT)
 			target_changed.emit(target)
 
-func _physics_process(delta: float) -> void:
-	if target == null:
-		if _marker != null:
-			_marker.visible = false
-		return
-
-	if not is_instance_valid(target) or _flat_distance(target) > lose_range:
-		_clear()
-		return
+func _physics_process(_delta: float) -> void:
 
 	if _marker != null:
-		_marker.visible = true
-		_marker.global_position = target.global_position + Vector3.UP * marker_height
-		_marker.rotate_y(delta * 2.0)
+		_marker.visible = target != null
+		if target != null:
+			_marker.global_position = target.global_position + Vector3.UP * marker_height
+			_marker.rotate_y(_delta * 2.0)
+			
+	var held: bool = Input.is_action_pressed("lock_on")
+
+	if not held:
+		if target != null:
+			_clear()
+		return
+
+	# Acquisition au premier frame d'appui
+	if target == null:
+		var t := _find_best()
+		if t != null:
+			target = t
+			if t.has_signal("died") and not t.died.is_connected(_clear):
+				t.died.connect(_clear, CONNECT_ONE_SHOT)
+			target_changed.emit(target)
+		return
+
+	# Cible morte ou trop loin
+	if not is_instance_valid(target) or _flat_distance(target) > lose_range:
+		_clear()
 
 
 func _clear() -> void:
+	if target != null and is_instance_valid(target):
+		if target.has_signal("died") and target.died.is_connected(_clear):
+			target.died.disconnect(_clear)
 	target = null
 	target_changed.emit(null)
 

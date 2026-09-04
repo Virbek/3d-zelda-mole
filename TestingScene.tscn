@@ -141,3 +141,4 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.7427406, 0, -5.7884903)
 player_path = NodePath("../Player")
 
 [node name="FirstRoom" parent="." unique_id=602238273 instance=ExtResource("7_5o5w8")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.08057976, 0, -0.06272125)
