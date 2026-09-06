@@ -11,10 +11,15 @@ extends Node3D
 ## buste part en avant. C'est le même calcul dans les deux cas ; seuls le point
 ## d'attraction et le signe de l'inclinaison changent.
 ##
+## Le magnétisme dévie le poing vers l'ennemi visé. Comme le corps suit la main,
+## une seule correction oriente toute la frappe — c'est ce qui permet de se
+## passer d'un verrouillage de cible.
+##
 ## Ce script ne gère QUE le visuel. La logique d'attaque (input, combo, dégâts)
 ## vit dans Combat.gd, qui pilote ce rig via play_attack / set_attack_progress /
 ## end_attack / play_charge / set_charge_progress / end_charge / play_dash /
-## set_dash_progress / end_dash, et lit get_attack_position pour ses hitbox.
+## set_dash_progress / end_dash / hit_impact, et lit get_attack_position et
+## get_magnet_target.
 
 @export var player_path: NodePath
 
@@ -41,6 +46,14 @@ extends Node3D
 @export var attract_gap: float = 0.55       ## distance à laquelle le corps suit la main
 @export var attract_rise: float = 0.10      ## élévation du corps quand la main mène
 @export var hand_lean_degrees: float = 75.0 ## inclinaison max quand la main mène
+
+@export_group("Magnétisme")
+@export var magnet_range: float = 3.5        ## portée de l'accrochage
+@export var magnet_angle: float = 130.0      ## cône devant le joueur, en degrés
+@export var magnet_strength: float = 0.75    ## 0 = aucun, 1 = le poing va pile dessus
+@export var magnet_align_weight: float = 2.2 ## poids de l'alignement face à la distance
+@export var magnet_standoff: float = 0.5     ## le poing s'arrête devant, pas dedans
+@export_flags_3d_physics var magnet_mask: int = 2
 
 @export_group("Ressenti des pas")
 @export var bob_height: float = 0.07        ## montée du corps pendant un pas
@@ -145,6 +158,10 @@ var _atk_t: float = 0.0
 var _recover_t: float = 0.0
 var _recover_side: float = 0.0   ## 0 = les deux mains récupèrent
 
+## Cible du magnétisme. Non typée : un nœud libéré ne peut pas être assigné
+## à une variable typée Node3D, ce qui ferait planter avant qu'on puisse tester.
+var _magnet_target = null
+
 ## Charge : mise en place, puis cercle vertical devant le corps
 var _charging: bool = false
 var _charge_k: float = 0.0
@@ -160,10 +177,12 @@ var _dash_power: float = 0.0
 var _dash_from := Vector3.ZERO
 var _dash_target := Vector3.ZERO
 var _fist_pos := Vector3.ZERO
-##Impact
+
+## Impact
 var _impact_t: float = 0.0
 var _impact_pos := Vector3.ZERO
 var _impact_side: float = 0.0
+
 
 func _ready() -> void:
 	for n in [body, foot_l, foot_r, hand_l, hand_r]:
@@ -192,11 +211,108 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# La cible est libre entre deux coups (le marqueur peut donc l'afficher en
+	# continu), mais verrouillée pendant une frappe : sinon le poing zigzaguerait
+	# entre deux ennemis en plein mouvement.
+	if _atk_kind == 0 and not _dashing:
+		_acquire_magnet()
+
 	_update_lead(delta)
 	_update_feet(delta)
 	_update_body(delta)
 	_update_charge_body()
 	_update_hands(delta)
+
+
+# ---------------------------------------------------------------- MAGNÉTISME
+
+func get_magnet_target():
+	if _magnet_target != null and not is_instance_valid(_magnet_target):
+		_magnet_target = null
+	return _magnet_target
+
+
+## L'intention du joueur : sa direction d'entrée s'il pousse le stick,
+## son orientation actuelle sinon.
+func _player_intent() -> Vector3:
+	var v := Vector3(
+		Input.get_axis("move_left", "move_right"),
+		0.0,
+		Input.get_axis("move_forward", "move_back")
+	).rotated(Vector3.UP, deg_to_rad(45.0))
+
+	if v.length() > 0.15:
+		return v.normalized()
+	return -player.global_transform.basis.z
+
+
+## La cible visée. Le critère n'est PAS la proximité seule : c'est le meilleur
+## compromis entre proximité et alignement avec l'intention du joueur. Un ennemi
+## un peu plus loin mais pile dans l'axe du stick gagne contre un ennemi collé
+## sur le côté — sans ça le joueur ne peut pas choisir sa cible, ce qui est
+## indispensable quand il n'y a pas de verrouillage.
+func _acquire_magnet() -> void:
+	_magnet_target = null
+
+	var space := get_world_3d().direct_space_state
+	var shape := SphereShape3D.new()
+	shape.radius = magnet_range
+
+	var params := PhysicsShapeQueryParameters3D.new()
+	params.shape = shape
+	params.transform = Transform3D(Basis(), _body_pos)
+	params.collision_mask = magnet_mask
+	params.collide_with_areas = true
+	params.collide_with_bodies = false
+
+	var intent: Vector3 = _player_intent()
+	var half: float = cos(deg_to_rad(magnet_angle) * 0.5)
+	var best_score: float = -INF
+
+	for hit in space.intersect_shape(params, 8):
+		var e = hit.collider.get_parent()
+		if e == null or not is_instance_valid(e):
+			continue
+		if not e.has_method("take_hit"):
+			continue
+
+		var to_e: Vector3 = e.global_position - _body_pos
+		to_e.y = 0.0
+		var d: float = to_e.length()
+		if d < 0.01:
+			continue
+
+		var dir: Vector3 = to_e / d
+		var align: float = intent.dot(dir)
+		if align < half:
+			continue   # hors du cône : on ne frappe jamais dans le dos
+
+		# Proximité normalisée : 1 = collé, 0 = à la limite de portée
+		var near: float = 1.0 - clampf(d / magnet_range, 0.0, 1.0)
+		var score: float = near + align * magnet_align_weight
+
+		if score > best_score:
+			best_score = score
+			_magnet_target = e
+
+
+## Dévie une position de main vers la cible. Comme le corps est attiré par la
+## main, tout le personnage suit — le magnétisme oriente donc la frappe entière.
+func _magnetize(pos: Vector3) -> Vector3:
+	var t = get_magnet_target()
+	if t == null:
+		return pos
+
+	var aim: Vector3 = t.global_position
+	aim.y = pos.y   # on ne corrige que l'horizontale
+
+	# Le poing s'arrête devant l'ennemi, pas dedans
+	var to_aim: Vector3 = aim - _body_pos
+	var d: float = to_aim.length()
+	if d > 0.01:
+		aim = _body_pos + to_aim / d * maxf(d - magnet_standoff, 0.3)
+
+	return pos.lerp(aim, magnet_strength)
 
 
 # ------------------------------------------------------- ATTRACTION UNIFIÉE
@@ -239,6 +355,7 @@ func _lead_hand_position() -> Vector3:
 func play_attack(kind: int) -> void:
 	_atk_kind = kind
 	_atk_t = 0.0
+	_acquire_magnet()   # verrouille la cible pour toute la durée du coup
 
 
 ## Combat.gd fait avancer le temps, pour que visuel et hitbox restent synchrones
@@ -254,9 +371,9 @@ func end_attack() -> void:
 
 ## Position d'une main à l'instant t. side : 1 = droite, -1 = gauche
 func get_attack_position(t: float, side: float) -> Vector3:
-	if _atk_kind == 3:
-		return _slam_position(t, side)
-	return _sweep_position(t, side)
+	var p: Vector3 = _slam_position(t, side) if _atk_kind == 3 \
+		else _sweep_position(t, side)
+	return _magnetize(p)
 
 
 ## Balayage circulaire horizontal.
@@ -352,6 +469,7 @@ func play_dash(power: float, target: Vector3) -> void:
 	_dash_power = clampf(power, 0.0, 1.0)
 	_dash_from = hand_r.global_position
 	_dash_target = target + Vector3.UP * dash_hand_height
+	_acquire_magnet()
 
 
 func set_dash_progress(k: float) -> void:
@@ -383,7 +501,7 @@ func _charge_hand_position(delta: float) -> Vector3:
 
 	# --- Phase 1 : mise en place, la main monte au sommet du cercle ---
 	if _windup_t < 1.0:
-		_windup_t = minf(_windup_t + delta / charge_windup, 1.0)
+		_windup_t = minf(_windup_t + delta / maxf(charge_windup, 0.01), 1.0)
 		var e: float = _windup_t * _windup_t * (3.0 - 2.0 * _windup_t)
 		return _charge_from.lerp(center + Vector3.UP * radius, e)
 
@@ -402,7 +520,7 @@ func _dash_hand_position() -> Vector3:
 
 	var k: float = clampf(_dash_k / dash_lead_fraction, 0.0, 1.0)
 	var e: float = 1.0 - pow(1.0 - k, 3.0)
-	return _dash_from.lerp(_dash_target, e)
+	return _magnetize(_dash_from.lerp(_dash_target, e))
 
 
 ## Effets propres à la charge : tassement et recul. Le dash, lui, passe
@@ -612,9 +730,9 @@ func _update_body(delta: float) -> void:
 # ---------------------------------------------------------------- MAINS
 
 func _update_hands(delta: float) -> void:
-
 	if _impact_t > 0.0:
 		_impact_t = maxf(_impact_t - delta, 0.0)
+
 	# Le temps de l'attaque est piloté par Combat.gd ; ici, juste la récupération
 	if _atk_kind == 0 and _recover_t > 0.0:
 		_recover_t = maxf(_recover_t - delta, 0.0)
@@ -646,12 +764,15 @@ func _update_hands(delta: float) -> void:
 			local.z -= swing   # -Z = avant en Godot
 		else:
 			local.z += swing * 0.6
+
+		# --- Impact : le poing est bloqué là où il a touché ---
 		if _impact_t > 0.0 and (_impact_side == 0.0 or h.side == _impact_side):
 			h.pos = _impact_pos
 			h.vel = Vector3.ZERO
 			h.node.global_position = h.pos
 			h.node.rotation = body.rotation
 			continue
+
 		var target: Vector3 = body.global_position + b * local
 
 		# --- Charge et dash : seul le poing droit est piloté ---
@@ -702,6 +823,6 @@ func hit_impact(side: float) -> void:
 	if back.length() > 0.01:
 		current += back.normalized() * impact_recoil
 
-	if _dashing :
+	if _dashing:
 		_dash_hit = true
 	_impact_pos = current

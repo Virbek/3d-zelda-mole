@@ -19,6 +19,15 @@ extends Node3D
 @export var lock_smoothing_boost: float = 1.4
 @export var size_lock_bonus: float = 1.5       ## léger dézoom quand une cible est verrouillée
 
+@export_group("Cadrage combat")
+@export var threat_range: float = 9.0        ## portée de prise en compte des ennemis
+@export var threat_weight: float = 0.30      ## décalage max vers les ennemis
+@export var threat_zoom: float = 2.0         ## dézoom quand des ennemis sont proches
+@export var threat_smoothing: float = 3.0    ## lissage du barycentre
+
+var _threat := Vector3.ZERO
+var _threat_w: float = 0.0
+
 @onready var cam: Camera3D = $Camera3D
 
 var _shake: float = 0.0
@@ -28,34 +37,30 @@ var lock_on: Node = null
 
 
 func _ready() -> void:
-	if target != null:
-		lock_on = target.get_node_or_null("LockOn")
-	if lock_on == null:
-		push_warning("CameraRig : LockOn introuvable sous le target")
+	return
 
 
 func _physics_process(delta: float) -> void:
 	if target == null:
 		return
 
-	# --- Point visé : le joueur, ou un point entre joueur et cible si lock actif ---
+	_update_threat(delta)
+
 	var focus: Vector3 = target.global_position + Vector3.UP * height_offset
-	var speed := smoothing
-	var locked := false
+	if _threat_w > 0.01:
+		var tp: Vector3 = _threat
+		tp.y = focus.y
+		focus = focus.lerp(tp, threat_weight * _threat_w)
 
-	if lock_on != null and lock_on.target != null and is_instance_valid(lock_on.target):
-		locked = true
-		var enemy_point: Vector3 = lock_on.target.global_position + Vector3.UP * height_offset
-		focus = focus.lerp(enemy_point, lock_focus_weight)
-		speed = smoothing * lock_smoothing_boost
-
-	var t := 1.0 - exp(-speed * delta)
+	var t := 1.0 - exp(-smoothing * delta)
 	global_position = global_position.lerp(focus, t)
 
-	# --- Zoom ---
 	var wanted: float = size_sprint if target.is_sprinting else size_normal
-	if locked:
-		wanted += size_lock_bonus
+	wanted += threat_zoom * _threat_w
+
+	# --- Zoom ---
+	
+	
 	var zt := 1.0 - exp(-zoom_smoothing * delta)
 	cam.size = lerp(cam.size, wanted, zt)
 
@@ -73,3 +78,31 @@ func _physics_process(delta: float) -> void:
 
 func shake(strength: float) -> void:
 	_shake = maxf(_shake, strength)
+
+## Barycentre des ennemis proches, pondéré par leur proximité. Pas de cible
+## unique : la caméra recule simplement vers le centre de gravité du danger,
+## ce qui garde tout le monde dans le cadre sans que le joueur ait à désigner
+## quoi que ce soit.
+func _update_threat(delta: float) -> void:
+	var sum := Vector3.ZERO
+	var total: float = 0.0
+
+	for e in get_tree().get_nodes_in_group("enemy"):
+		if not is_instance_valid(e):
+			continue
+		var v: Vector3 = e.global_position - target.global_position
+		v.y = 0.0
+		var d: float = v.length()
+		if d > threat_range:
+			continue
+		var w: float = 1.0 - (d / threat_range)
+		sum += e.global_position * w
+		total += w
+
+	var t: float = 1.0 - exp(-threat_smoothing * delta)
+
+	if total > 0.01:
+		_threat = _threat.lerp(sum / total, t)
+		_threat_w = lerpf(_threat_w, clampf(total, 0.0, 1.0), t)
+	else:
+		_threat_w = lerpf(_threat_w, 0.0, t)

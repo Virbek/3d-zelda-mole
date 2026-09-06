@@ -7,13 +7,14 @@ extends CharacterBody3D
 @onready var combat: Node = $Combat
 @export var sprint_speed: float = 10.0
 
-@onready var lock_on: Node = $LockOn
-@export var lock_turn_speed: float = 12.0
+
+
 
 @export_group("Esquive")
 @export var iframe_start: float = 0.05    ## délai avant que l'invincibilité s'active
 @export var iframe_duration: float = 0.25 ## durée de l'invincibilité
 @export var dodge_speed: float = 16.0
+@export var dodge_distance: float = 3.2
 @export var dodge_duration: float = 0.26
 @export var dodge_cooldown: float = 0.18
 @export var iframe_window := Vector2(0.05, 0.65)
@@ -96,16 +97,15 @@ func _physics_process(delta: float) -> void:
 
 		# Tient la vitesse puis coupe net
 		var e: float = 1.0 - pow(_dodge_t, 3.0)
-		velocity.x = _dodge_dir.x * dodge_speed * e
-		velocity.z = _dodge_dir.z * dodge_speed * e
+		# La courbe de décélération intègre à ~0.75 : on compense pour que
+		# dodge_distance corresponde à la distance réellement parcourue.
+		var spd: float = dodge_distance / (dodge_duration * 0.75)
+		velocity.x = _dodge_dir.x * spd * e
+		velocity.z = _dodge_dir.z * spd * e
 
-		# Face à la cible si verrouillée, sinon dans la direction de l'esquive
-		var lt = lock_on.target
-		if lt != null and is_instance_valid(lt):
-			_face_target(lt, delta)
-		else:
-			var a := atan2(-_dodge_dir.x, -_dodge_dir.z)
-			rotation.y = lerp_angle(rotation.y, a, 20.0 * delta)
+		# Face à la cible si verrouillée, sinon dans la direction de l'esquiv
+		var a := atan2(-_dodge_dir.x, -_dodge_dir.z)
+		rotation.y = lerp_angle(rotation.y, a, 20.0 * delta)
 
 		_apply_gravity(delta)
 		move_and_slide()
@@ -137,10 +137,7 @@ func _physics_process(delta: float) -> void:
 		velocity.z = move_toward(velocity.z, target_vel.z, acceleration * delta)
 
 	# --- Orientation ---
-	var lock_target = lock_on.target
-	if lock_target != null and is_instance_valid(lock_target):
-		_face_target(lock_target, delta)
-	elif direction.length_squared() > 0.01:
+	if direction.length_squared() > 0.01:
 		var angle := atan2(-direction.x, -direction.z)
 		rotation.y = lerp_angle(rotation.y, angle, rotation_speed * delta)
 
@@ -148,14 +145,7 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 
 
-## Oriente le perso vers un nœud, à plat
-func _face_target(node: Node3D, delta: float) -> void:
-	var to_t: Vector3 = node.global_position - global_position
-	to_t.y = 0.0
-	if to_t.length() < 0.01:
-		return
-	var a := atan2(-to_t.x, -to_t.z)
-	rotation.y = lerp_angle(rotation.y, a, lock_turn_speed * delta)
+
 
 
 func _apply_gravity(delta: float) -> void:

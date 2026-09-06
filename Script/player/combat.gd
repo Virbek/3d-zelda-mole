@@ -55,6 +55,13 @@ extends Node
 @export var hit_stop_time: float = 0.06
 @export var hit_stop_scale: float = 0.05
 
+@export_group("Rapprochement")
+@export var lunge_range: float = 3.5      ## portée du rapprochement
+@export var lunge_speed: Array[float] = [12.0, 6.0, 6.0]  ## le coup 3 se rapproche peu
+@export var lunge_standoff: float = 1.1   ## distance d'arrêt devant l'ennemi
+
+
+
 @onready var player: CharacterBody3D = get_parent()
 @onready var rig: Node3D = get_node(rig_path)
 @onready var fist_l: Area3D = get_node(fist_box_l_path)
@@ -168,6 +175,8 @@ func _start(step: int) -> void:
 	_buffered = false
 	_hit_list.clear()
 	rig.play_attack(step)
+
+	_lunge(step)
 
 	if step == 3:
 		_hop()
@@ -359,3 +368,22 @@ func _shake(strength: float) -> void:
 	var cam := player.get_viewport().get_camera_3d()
 	if cam != null and cam.get_parent().has_method("shake"):
 		cam.get_parent().shake(strength)
+
+
+
+func _lunge(step: int) -> void:
+	var target: Node3D = rig.get_magnet_target()
+	if target == null or not is_instance_valid(target):
+		return
+
+	var to_e: Vector3 = target.global_position - player.global_position
+	to_e.y = 0.0
+	var d: float = to_e.length()
+	if d < lunge_standoff or d > lunge_range:
+		return
+
+	player.rotation.y = atan2(-to_e.x, -to_e.z)
+
+	var push: Vector3 = to_e.normalized() * lunge_speed[step - 1]
+	player.velocity.x = push.x
+	player.velocity.z = push.z

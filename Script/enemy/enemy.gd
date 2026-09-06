@@ -88,6 +88,7 @@ var _tele_tween: Tween
 
 
 func _ready() -> void:
+	add_to_group("enemy")
 	health = max_health
 	_base_scale = mesh.scale
 
