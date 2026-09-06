@@ -116,7 +116,6 @@ durations = Array[float]([0.3, 0.3, 0.75])
 hit_windows = Array[Vector2]([Vector2(0.05, 0.95), Vector2(0.05, 0.95), Vector2(0.45, 0.8)])
 dash_distance_min = 3.0
 dash_distance_max = 5.0
-dash_damage = 1
 
 [node name="Rig" type="Node3D" parent="Player" unique_id=2111491753]
 script = ExtResource("3_6mnxl")
