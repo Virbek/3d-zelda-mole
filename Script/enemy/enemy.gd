@@ -269,6 +269,11 @@ func _hurt(delta: float) -> void:
 	velocity.z = _knockback.z
 	_knockback *= exp(-knockback_damping * delta)
 
+	# Sans ça, un velocity.y accumulé pendant la charge pousse l'ennemi
+	# dans le sol pendant que le recul l'envoie sur le côté.
+	if is_on_floor() and velocity.y < 0.0:
+		velocity.y = 0.0
+
 	if _t >= hurt_time:
 		_set_state(State.CHASE)
 

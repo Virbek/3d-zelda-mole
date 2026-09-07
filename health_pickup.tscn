@@ -1,7 +1,5 @@
 [gd_scene format=3 uid="uid://siat8vm8to5i"]
 
-[ext_resource type="Script" path="res://health_pickup.gd" id="1_01648"]
-
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_j4swo"]
 albedo_color = Color(0, 1, 0.3944329, 1)
 
@@ -10,7 +8,6 @@ material = SubResource("StandardMaterial3D_j4swo")
 radius = 0.18
 
 [node name="HealthPickup" type="Area3D" unique_id=1816414831]
-script = ExtResource("1_01648")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=674839131]
 mesh = SubResource("SphereMesh_osq7l")

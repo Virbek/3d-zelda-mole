@@ -109,7 +109,8 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	_t += delta
-
+	if state != State.AIRBORNE and global_position.y < _ground_y:
+		global_position.y = _ground_y
 	match state:
 		State.IDLE:
 			_idle()
