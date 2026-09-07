@@ -235,7 +235,6 @@ func _landed(_delta: float) -> void:
 
 	_jumps_left -= 1
 	if _jumps_left > 0:
-		# Enchaînement immédiat : c'est ce qui rend les phases tardives denses
 		await get_tree().create_timer(chain_delay).timeout
 		if state == State.LANDED:
 			_start_jump()
@@ -308,8 +307,8 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 		_die()
 		return
 
-	_check_phase()
 	_flash()
+	_check_phase()
 
 
 ## Un tiers de vie perdu = un saut de plus par série.

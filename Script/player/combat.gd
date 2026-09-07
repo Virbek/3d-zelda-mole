@@ -380,7 +380,6 @@ func _process_punch(delta: float) -> void:
 func _punch_hits() -> void:
 	if fist_r == null:
 		return
-
 	for area in fist_r.get_overlapping_areas():
 		var e = area.get_parent()
 		if e == null or not is_instance_valid(e) or e in _hit_list:
@@ -397,6 +396,7 @@ func _punch_hits() -> void:
 			e.take_hit(dir.normalized(), dmg)
 
 		rig.hit_impact(1.0)
+		Sfx.play("hit_heavy", e.global_position)
 		_hit_stop()
 		_shake(punch_shake * _punch_power)
 

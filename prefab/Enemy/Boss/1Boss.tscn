@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" uid="uid://dayde2r34xido" path="res://prefab/Enemy/Boss/1_boss.gd" id="1_gy1u6"]
 [ext_resource type="PackedScene" uid="uid://bv26s82ywtafr" path="res://prefab/Enemy/blast_zone.tscn" id="2_6kxw7"]
+[ext_resource type="PackedScene" uid="uid://w28ip5a4qs50" path="res://prefab/Enemy/health_pickup.tscn" id="3_6kxw7"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_gy1u6"]
 albedo_color = Color(0, 0, 1, 1)
@@ -16,7 +17,8 @@ albedo_color = Color(0, 0, 1, 1)
 script = ExtResource("1_gy1u6")
 blast_scene = ExtResource("2_6kxw7")
 damage_per_hit = 2
-rest_time = 3.0
+rest_time = 2.0
+pickup_scene = ExtResource("3_6kxw7")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1421769649]
 transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
