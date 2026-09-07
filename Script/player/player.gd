@@ -6,6 +6,7 @@ extends CharacterBody3D
 @export var gravity: float = 20.0
 @onready var combat: Node = $Combat
 @export var sprint_speed: float = 10.0
+@export var spin_speed_factor: float = 0.7
 
 
 
@@ -63,11 +64,6 @@ func _physics_process(delta: float) -> void:
 			rig.visible = not rig.visible
 		if _hurt_t == 0.0:
 			rig.visible = true
-
-	if combat.is_dashing:
-		move_and_slide()
-		return
-
 	# --- Entrées, converties dans le repère de la caméra ---
 	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var direction := Vector3(input.x, 0.0, input.y).rotated(Vector3.UP, CAM_YAW)
@@ -89,7 +85,7 @@ func _physics_process(delta: float) -> void:
 			_dodge_dir = global_transform.basis.z
 
 	# --- Esquive : exécution (court-circuite le déplacement normal) ---
-	if is_dodging:
+	if is_dodging and not combat.is_spinning:
 		_dodge_t += delta / dodge_duration
 		_iframe_t += delta
 		is_invulnerable = _iframe_t >= iframe_start \
@@ -140,6 +136,11 @@ func _physics_process(delta: float) -> void:
 	if direction.length_squared() > 0.01:
 		var angle := atan2(-direction.x, -direction.z)
 		rotation.y = lerp_angle(rotation.y, angle, rotation_speed * delta)
+	
+	if combat.is_charging:
+		target_vel *= 0.25
+	elif combat.is_spinning:
+		target_vel *= spin_speed_factor
 
 	_apply_gravity(delta)
 	move_and_slide()

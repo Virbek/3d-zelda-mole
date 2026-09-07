@@ -1,0 +1,40 @@
+[gd_scene format=3 uid="uid://cgvh4bybr63w8"]
+
+[ext_resource type="Script" uid="uid://dayde2r34xido" path="res://prefab/Enemy/Boss/1_boss.gd" id="1_gy1u6"]
+[ext_resource type="PackedScene" uid="uid://bv26s82ywtafr" path="res://prefab/Enemy/blast_zone.tscn" id="2_6kxw7"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_gy1u6"]
+albedo_color = Color(0, 0, 1, 1)
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_osq7l"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_osq7l"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_n3ufq"]
+
+[node name="1Boss" type="CharacterBody3D" unique_id=601346827]
+script = ExtResource("1_gy1u6")
+blast_scene = ExtResource("2_6kxw7")
+damage_per_hit = 2
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1421769649]
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
+material_override = SubResource("StandardMaterial3D_gy1u6")
+mesh = SubResource("CapsuleMesh_osq7l")
+
+[node name="MeshInstance3D2" type="MeshInstance3D" parent="." unique_id=2034128801]
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
+material_override = SubResource("StandardMaterial3D_gy1u6")
+mesh = SubResource("CapsuleMesh_osq7l")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1773266787]
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
+shape = SubResource("CapsuleShape3D_osq7l")
+
+[node name="HurtBox" type="Area3D" parent="." unique_id=453076671]
+collision_layer = 0
+collision_mask = 2
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="HurtBox" unique_id=1085870825]
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
+shape = SubResource("CapsuleShape3D_n3ufq")

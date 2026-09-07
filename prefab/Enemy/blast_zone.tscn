@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://bv26s82ywtafr"]
+
+[ext_resource type="Script" uid="uid://jpir76g4j0pt" path="res://blast_zone.gd" id="1_d4epy"]
+
+[node name="BlastZone" type="Node3D" unique_id=1147567327]
+script = ExtResource("1_d4epy")

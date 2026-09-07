@@ -1,7 +1,8 @@
 [gd_scene format=3 uid="uid://3wg3lxf0um7l"]
 
 [ext_resource type="Shader" uid="uid://ddxq58qvuephy" path="res://Shader/vignette.gdshader" id="1_7e65j"]
-[ext_resource type="Script" uid="uid://bv1jw3tg87028" path="res://prefab/hud.gd" id="1_wufx6"]
+[ext_resource type="Script" uid="uid://bv1jw3tg87028" path="res://Script/hud.gd" id="1_wufx6"]
+[ext_resource type="Script" uid="uid://dn8054f6i3e8n" path="res://prefab/Player/boss_health_bar.gd" id="3_oqgrd"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_co5ba"]
 shader = ExtResource("1_7e65j")
@@ -40,3 +41,10 @@ layout_mode = 0
 offset_right = 240.0
 offset_bottom = 18.0
 color = Color(0.40198824, 0.8754984, 7.70092e-07, 1)
+
+[node name="BossHealthBar" type="Control" parent="." unique_id=331854936]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0
+script = ExtResource("3_oqgrd")

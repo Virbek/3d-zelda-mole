@@ -1,11 +1,11 @@
-[gd_scene format=3 uid="uid://nv4kkflm8t4t"]
+[gd_scene format=3 uid="uid://uadbmatn651"]
 
-[ext_resource type="Script" uid="uid://c3ttsl24yvlx1" path="res://Script/enemy/enemy.gd" id="1_tt7e2"]
-[ext_resource type="PackedScene" path="res://prefab/HealthBar.tscn" id="2_e3gy8"]
-[ext_resource type="PackedScene" path="res://health_pickup.tscn" id="2_mx2wg"]
+[ext_resource type="Script" uid="uid://bfg4eip8k61bs" path="res://prefab/Enemy/enemy_bomber.gd" id="1_wjp03"]
+[ext_resource type="PackedScene" uid="uid://bv26s82ywtafr" path="res://prefab/Enemy/blast_zone.tscn" id="2_rd7hb"]
+[ext_resource type="PackedScene" uid="uid://otfyx1hk6wag" path="res://prefab/Enemy/HealthBar.tscn" id="3_uj8s5"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_5gf4p"]
-albedo_color = Color(0.47866166, 0.47866172, 0.47866166, 1)
+albedo_color = Color(1, 0.94337994, 0.4788676, 1)
 
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_j4swo"]
 
@@ -15,14 +15,30 @@ albedo_color = Color(0.47866166, 0.47866172, 0.47866166, 1)
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_kef0k"]
 
-[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_an2lv"]
-radius = 0.6
+[node name="EnemyBomber" type="CharacterBody3D" unique_id=810473897]
+script = ExtResource("1_wjp03")
+player_path = null
+blast_scene = ExtResource("2_rd7hb")
+damage_per_hit = null
+detect_range = null
+lose_range = null
+trigger_range = null
+chase_speed = null
+accel = null
+turn_speed = null
+gravity = null
+prime_time = null
+prime_scale = null
+knockback_force = null
+knockback_damping = null
+prime_color = null
+flash_color = null
+pulse_base = null
+pulse_near = null
+pickup_chance = null
+pickup_max = null
 
-[node name="Enemy" type="CharacterBody3D" unique_id=810473897]
-script = ExtResource("1_tt7e2")
-pickup_scene = ExtResource("2_mx2wg")
-
-[node name="HealthBar" parent="." unique_id=661807815 instance=ExtResource("2_e3gy8")]
+[node name="HealthBar" parent="." unique_id=661807815 instance=ExtResource("3_uj8s5")]
 transform = Transform3D(1.5, 0, 0, 0, 1.5, 0, 0, 0, 1.5, 0, 1.9371288, 0)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=643444699]
@@ -42,11 +58,3 @@ collision_mask = 0
 [node name="CollisionShape3D" type="CollisionShape3D" parent="HurtBox" unique_id=840996368]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6468748, 0)
 shape = SubResource("CapsuleShape3D_kef0k")
-
-[node name="AttackBox" type="Area3D" parent="." unique_id=1781769692]
-collision_layer = 0
-collision_mask = 4
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="AttackBox" unique_id=1922697872]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, -0.002523303)
-shape = SubResource("CapsuleShape3D_an2lv")

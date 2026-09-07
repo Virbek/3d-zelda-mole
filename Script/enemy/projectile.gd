@@ -43,10 +43,13 @@ func _physics_process(delta: float) -> void:
 	mesh.rotate_y(spin_speed * delta)
 
 
-## Zones : c'est ici que le joueur se fait toucher.
 func _on_area_entered(area: Area3D) -> void:
 	if _dead or not area.is_in_group("player_hurt"):
 		return
+
+	# On marque AVANT d'infliger : _pop passe par set_deferred, donc la zone
+	# reste active jusqu'à la fin de la frame et peut retoucher entre-temps.
+	_dead = true
 
 	if area.has_method("take_damage"):
 		var dir: Vector3 = area.global_position - global_position

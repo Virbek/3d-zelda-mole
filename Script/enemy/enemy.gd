@@ -11,7 +11,7 @@ extends CharacterBody3D
 ## torse (Area3D du groupe "player_hurt"). Viser le torse pour la navigation
 ## le ferait zigzaguer, puisque le buste oscille à chaque pas.
 
-enum State { IDLE, CHASE, TELEGRAPH, CHARGE, RECOVER, HURT, DEAD }
+enum State { IDLE, CHASE, TELEGRAPH, CHARGE, RECOVER, HURT, STUNNED, DEAD }
 
 signal died
 
@@ -61,7 +61,17 @@ signal died
 @export var death_time: float = 0.45
 @export var death_launch: float = 1.6
 
-@onready var player: CharacterBody3D = get_node(player_path)
+@export_group("Butin")
+@export var pickup_scene: PackedScene
+@export var pickup_chance: float = 0.45   ## probabilité d'en lâcher un
+@export var pickup_max: int = 2           ## combien au maximum
+
+@export_group("Étourdissement")
+@export var stun_duration: float = 3.0
+@export var stun_color := Color(0.25, 1.0, 0.35)
+@export var stun_wobble: float = 0.12   ## amplitude du vacillement
+
+var player: CharacterBody3D = null
 @onready var mesh: MeshInstance3D = $MeshInstance3D
 @onready var health_bar: Node3D = $HealthBar
 @onready var hurt_box: Area3D = $HurtBox
@@ -80,6 +90,8 @@ var _charge_start := Vector3.ZERO
 var _knockback := Vector3.ZERO
 var _hit_player := false             ## un seul dégât par charge
 
+var _stun_base_y: float = 0.0
+
 var _mat: StandardMaterial3D
 var _base_color: Color
 var _base_scale := Vector3.ONE
@@ -88,6 +100,11 @@ var _tele_tween: Tween
 
 
 func _ready() -> void:
+	player = get_node_or_null(player_path)
+	if player == null:
+		push_warning("%s : player introuvable" % name)
+		set_physics_process(false)
+		return
 	add_to_group("enemy")
 	health = max_health
 	_base_scale = mesh.scale
@@ -120,6 +137,8 @@ func _physics_process(delta: float) -> void:
 			_recover(delta)
 		State.HURT:
 			_hurt(delta)
+		State.STUNNED:
+			_stunned(delta)
 		State.DEAD:
 			return
 
@@ -333,6 +352,8 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 	attack_box.monitoring = false
 	AttackToken.release(self)
 	mesh.scale = _base_scale
+	mesh.rotation.z = 0.0
+	mesh.position.y = _stun_base_y
 
 	_knockback = direction * knockback_force
 	_set_state(State.HURT)
@@ -355,7 +376,7 @@ func _flash() -> void:
 func _die(direction: Vector3) -> void:
 	_set_state(State.DEAD)
 	died.emit()
-
+	_drop_pickups()
 	# On coupe toutes les interactions immédiatement
 	hurt_box.monitorable = false
 	attack_box.monitoring = false
@@ -381,3 +402,58 @@ func _die(direction: Vector3) -> void:
 
 	await d.finished
 	queue_free()
+
+## Appelé par le joueur. Un ennemi étourdi est immobile et ouvert à la toupie.
+func stun(duration: float) -> void:
+	if state == State.DEAD:
+		return
+
+	stun_duration = duration
+	attack_box.monitoring = false
+
+	
+	AttackToken.release(self)
+	mesh.scale = _base_scale
+	velocity = Vector3.ZERO
+	_cooldown = maxf(_cooldown, duration)
+
+	_set_state(State.STUNNED)
+
+	if _flash_tween != null and _flash_tween.is_running():
+		_flash_tween.kill()
+	if _tele_tween != null and _tele_tween.is_running():
+		_tele_tween.kill()
+	_mat.albedo_color = stun_color
+
+func _stunned(delta: float) -> void:
+	velocity.x = 0.0
+	velocity.z = 0.0
+
+	mesh.position.y = _stun_base_y + sin(_t * 9.0) * stun_wobble * 0.3
+	mesh.rotation.z = sin(_t * 6.0) * stun_wobble
+
+	# Vert vif seulement à portée : le joueur sait sans ambiguïté quand cliquer
+	var d: float = _distance_to_player()
+	_mat.albedo_color = stun_color if d <= 3.0 else stun_color.darkened(0.45)
+
+	if _t >= stun_duration:
+		mesh.position.y = _stun_base_y
+		mesh.rotation.z = 0.0
+		_mat.albedo_color = _base_color
+		_set_state(State.CHASE)
+
+func is_stunned() -> bool:
+	return state == State.STUNNED
+
+
+## Le butin est lâché avant le tween de mort : sinon l'await retarde
+## l'apparition d'une demi-seconde, et le lien de cause à effet se perd.
+func _drop_pickups() -> void:
+	if pickup_scene == null or randf() > pickup_chance:
+		return
+
+	var n: int = 1 + (randi() % maxi(pickup_max, 1))
+	for i in n:
+		var p: Area3D = pickup_scene.instantiate()
+		get_tree().current_scene.add_child(p)
+		p.global_position = global_position + Vector3.UP * 0.6

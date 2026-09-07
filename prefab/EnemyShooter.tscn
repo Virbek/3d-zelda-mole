@@ -1,8 +1,9 @@
-[gd_scene format=3 uid="uid://c732lgsxwdwcw"]
+[gd_scene format=3 uid="uid://8841mka2gh7s"]
 
 [ext_resource type="Script" uid="uid://b0ndfe22ovd07" path="res://Script/enemy/enemy_shooter.gd" id="1_4okwo"]
-[ext_resource type="PackedScene" uid="uid://otfyx1hk6wag" path="res://prefab/HealthBar.tscn" id="2_4okwo"]
-[ext_resource type="PackedScene" uid="uid://bq27fh8g3khdi" path="res://prefab/projectile.tscn" id="2_lwyqm"]
+[ext_resource type="PackedScene" path="res://prefab/HealthBar.tscn" id="2_4okwo"]
+[ext_resource type="PackedScene" uid="uid://sbxrnrd4lwl3" path="res://prefab/projectile.tscn" id="2_lwyqm"]
+[ext_resource type="PackedScene" path="res://health_pickup.tscn" id="3_lwyqm"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_5gf4p"]
 albedo_color = Color(0.30761838, 0.54780513, 0.25590456, 1)
@@ -20,6 +21,7 @@ script = ExtResource("1_4okwo")
 projectile_scene = ExtResource("2_lwyqm")
 keep_min = 0.0
 flee_speed = 0.0
+pickup_scene = ExtResource("3_lwyqm")
 
 [node name="HealthBar" parent="." unique_id=661807815 instance=ExtResource("2_4okwo")]
 transform = Transform3D(1.5, 0, 0, 0, 1.5, 0, 0, 0, 1.5, 0, 1.9371288, 0)

@@ -37,3 +37,9 @@ func take_damage(amount: int, direction: Vector3) -> void:
 ## le joueur se voit, ce qui rend les esquives lisibles.
 func get_aim_position() -> Vector3:
 	return global_position
+
+## Le pickup vole vers cette zone (c'est le torse visible), donc c'est elle
+## qu'il appelle. Comme pour les dégâts, on ne fait que transmettre.
+func heal(amount: int) -> void:
+	if player != null and player.has_method("heal"):
+		player.heal(amount)

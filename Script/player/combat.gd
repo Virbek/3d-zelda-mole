@@ -1,15 +1,19 @@
 extends Node
 
-## Logique de combat du joueur : combo 3 coups, attaque chargée avec dash.
+## Logique de combat du joueur.
+##
+## Trois outils qui ne se recouvrent pas :
+##   - le combo 3 coups, au contact, avec une chance d'étourdir sur le finisher
+##   - le poing chargé, à distance : le bras part seul, le joueur reste au sol
+##   - la toupie, débloquée uniquement près d'un ennemi étourdi
 ##
 ## RÉPARTITION DES RÔLES :
 ##   - les pieds portent le déplacement (capsule du Player, au sol)
 ##   - le torse porte les dégâts subis   (HurtBox enfant de Body)
 ##   - les poings portent les dégâts infligés (FistBox enfant de HandL/HandR)
 ##
-## Les hitbox ne sont donc plus calculées : ce sont de vraies Area3D attachées
-## aux mains. Là où le poing se dessine, il frappe. Plus aucun risque que la
-## zone de dégâts et le visuel divergent.
+## Les hitbox ne sont donc pas calculées : ce sont de vraies Area3D attachées
+## aux mains. Là où le poing se dessine, il frappe.
 ##
 ## Le clic gauche est ambigu par nature : appui court = coup normal,
 ## appui maintenu = charge. On ne peut pas déclencher l'attaque au moment
@@ -33,8 +37,17 @@ extends Node
 @export var hop_force: float = 4.5
 @export var hop_forward: float = 3.0
 
+@export_group("Rapprochement")
+@export var lunge_range: float = 3.5
+@export var lunge_speed: Array[float] = [12.0, 12.0, 6.0]  ## le coup 3 bondit déjà
+@export var lunge_standoff: float = 1.6  ## en dessous, pas de rapprochement
+
 @export_group("Soin")
 @export var full_combo_heal: int = 1     ## soin quand le coup 3 touche
+
+@export_group("Étourdissement")
+@export var stun_chance: float = 0.35    ## probabilité sur le coup 3
+@export var stun_duration: float = 3.0
 
 @export_group("Attaque chargée")
 @export var charge_delay: float = 0.15       ## maintien avant d'entrer en charge
@@ -42,33 +55,35 @@ extends Node
 @export var charge_min_time: float = 0.30    ## en dessous : simple coup normal
 @export var charge_max_time: float = 1.10    ## charge pleine
 
-@export_group("Dash chargé")
-@export var dash_distance_min: float = 2.0   ## portée à charge minimale
-@export var dash_distance_max: float = 4.5   ## portée à charge pleine
-@export var dash_speed_min: float = 15.0
-@export var dash_speed_max: float = 26.0
-@export var dash_max_time: float = 0.6       ## sécurité anti-blocage
-@export var dash_damage: int = 3             ## dégâts à charge pleine
-@export var dash_shake: float = 0.5
+@export_group("Poing chargé")
+## Ces trois durées doivent correspondre à celles du rig, qui dessine le vol.
+@export var punch_out_time: float = 0.14
+@export var punch_hold_time: float = 0.08
+@export var punch_back_time: float = 0.22
+@export var punch_range_min: float = 3.0
+@export var punch_range_max: float = 7.0
+@export var punch_damage: int = 3
+@export var punch_shake: float = 0.5
+
+@export_group("Toupie")
+@export var spin_trigger_range: float = 3.0  ## distance à l'ennemi étourdi
+@export var spin_duration: float = 1.6
+@export var spin_damage: int = 1
+@export var spin_tick: float = 0.25          ## délai entre deux dégâts sur le même ennemi
+@export var spin_shake: float = 0.2
 
 @export_group("Hit stop")
 @export var hit_stop_time: float = 0.06
 @export var hit_stop_scale: float = 0.05
 
-@export_group("Rapprochement")
-@export var lunge_range: float = 3.5      ## portée du rapprochement
-@export var lunge_speed: Array[float] = [12.0, 6.0, 6.0]  ## le coup 3 se rapproche peu
-@export var lunge_standoff: float = 1.1   ## distance d'arrêt devant l'ennemi
-
-
-
 @onready var player: CharacterBody3D = get_parent()
 @onready var rig: Node3D = get_node(rig_path)
-@onready var fist_l: Area3D = get_node(fist_box_l_path)
-@onready var fist_r: Area3D = get_node(fist_box_r_path)
+@onready var fist_l: Area3D = get_node_or_null(fist_box_l_path)
+@onready var fist_r: Area3D = get_node_or_null(fist_box_r_path)
 
 var is_charging: bool = false
-var is_dashing: bool = false
+var is_punching: bool = false
+var is_spinning: bool = false
 
 ## Progression de la mise en charge, 0 → 1. Lue par Player.gd pour ralentir
 ## le déplacement en même temps que le poing se met en place.
@@ -86,11 +101,11 @@ var _press_step: int = 1          ## coup que l'appui déclenchera s'il est rel�
 var _charge_t: float = 0.0
 var _healed_this_combo: bool = false
 
-var _dash_t: float = 0.0
-var _dash_dir: Vector3 = Vector3.ZERO
-var _dash_power: float = 0.0
-var _dash_start: Vector3 = Vector3.ZERO
-var _dash_dist: float = 0.0
+var _punch_t: float = 0.0
+var _punch_power: float = 0.0
+
+var _spin_t: float = 0.0
+var _spin_hits: Dictionary = {}   ## ennemi → temps du dernier dégât
 
 
 var is_attacking: bool:
@@ -99,15 +114,26 @@ var is_attacking: bool:
 
 
 func _ready() -> void:
+	if fist_l == null or fist_r == null:
+		push_warning("Combat : FistBox manquantes, les coups ne toucheront rien")
+		return
 	_set_fists(false, false)
 
 
 # ---------------------------------------------------------------- ENTRÉES
 
 func _unhandled_input(event: InputEvent) -> void:
+	# --- Toupie : uniquement près d'un ennemi étourdi ---
+	if event.is_action_pressed("actionEvenement"):
+		if is_spinning or is_charging or is_punching or player.is_dodging:
+			return
+		if _find_stunned_nearby() != null:
+			_start_spin()
+		return
+
 	if not event.is_action_pressed("attack"):
 		return
-	if player.is_dodging or is_charging or is_dashing:
+	if player.is_dodging or is_charging or is_punching or is_spinning:
 		return
 
 	if _step == 0:
@@ -124,9 +150,13 @@ func _unhandled_input(event: InputEvent) -> void:
 # ---------------------------------------------------------------- BOUCLE
 
 func _physics_process(delta: float) -> void:
+	if is_spinning:
+		_process_spin(delta)
+		return
+
 	_handle_charge(delta)
 
-	if is_dashing:
+	if is_punching:
 		return
 
 	if _grace > 0.0:
@@ -189,9 +219,32 @@ func _hop() -> void:
 	player.velocity.z += fwd.z * hop_forward
 
 
+## Rapproche le joueur de sa cible au démarrage d'un coup. C'est ce qui évite
+## les allers-retours : le joueur vise approximativement, le jeu comble l'écart.
+## Appelé AVANT _hop, dont l'impulsion s'ajoute par-dessus.
+func _lunge(step: int) -> void:
+	var target = rig.get_magnet_target()
+	if target == null:
+		return
+
+	var to_e: Vector3 = target.global_position - player.global_position
+	to_e.y = 0.0
+	var d: float = to_e.length()
+	if d < lunge_standoff or d > lunge_range:
+		return
+
+	player.rotation.y = atan2(-to_e.x, -to_e.z)
+
+	var push: Vector3 = to_e.normalized() * lunge_speed[step - 1]
+	player.velocity.x = push.x
+	player.velocity.z = push.z
+
+
 # ---------------------------------------------------------------- POINGS
 
 func _set_fists(left: bool, right: bool) -> void:
+	if fist_l == null or fist_r == null:
+		return
 	fist_l.monitoring = left
 	fist_r.monitoring = right
 
@@ -200,12 +253,12 @@ func _set_fists(left: bool, right: bool) -> void:
 ## ennemi encaisse plusieurs fois le même coup, frame après frame.
 func _collect_hits() -> void:
 	for fist in [fist_l, fist_r]:
-		if not fist.monitoring:
+		if fist == null or not fist.monitoring:
 			continue
 
 		for area in fist.get_overlapping_areas():
 			var e = area.get_parent()
-			if e == null or e in _hit_list:
+			if e == null or not is_instance_valid(e) or e in _hit_list:
 				continue
 			if not e.has_method("take_hit"):
 				continue
@@ -222,18 +275,17 @@ func _collect_hits() -> void:
 			var side: float = 1.0 if fist == fist_r else -1.0
 			rig.hit_impact(0.0 if _step == 3 else side)
 
-			# Le soin ne récompense que le finisher qui touche vraiment
-			if _step == 3 and not _healed_this_combo:
-				_healed_this_combo = true
-				if player.has_method("heal"):
-					player.heal(full_combo_heal)
+			# Le finisher peut étourdir : c'est lui qui ouvre la toupie
+			if _step == 3 and e.has_method("stun") and randf() < stun_chance:
+				e.stun(stun_duration)
+
 
 
 # ---------------------------------------------------------------- CHARGE
 
 func _handle_charge(delta: float) -> void:
-	if is_dashing:
-		_process_dash(delta)
+	if is_punching:
+		_process_punch(delta)
 		return
 
 	# Phase d'attente : coup normal ou début de charge ?
@@ -283,72 +335,139 @@ func _release_charge() -> void:
 		return
 
 	var span: float = maxf(charge_max_time - charge_min_time, 0.01)
-	_dash_power = clampf((_charge_t - charge_min_time) / span, 0.0, 1.0)
+	_punch_power = clampf((_charge_t - charge_min_time) / span, 0.0, 1.0)
 
-	_dash_dir = -player.global_transform.basis.z
-	_dash_dir.y = 0.0
-	_dash_dir = _dash_dir.normalized()
+	# La cible du magnétisme sert de destination ; à défaut, droit devant.
+	var dist: float = lerpf(punch_range_min, punch_range_max, _punch_power)
+	var fwd: Vector3 = -player.global_transform.basis.z
+	fwd.y = 0.0
+	var dest: Vector3 = player.global_position + fwd.normalized() * dist
 
-	_dash_dist = lerpf(dash_distance_min, dash_distance_max, _dash_power)
-	_dash_start = player.global_position
-	_dash_t = 0.0
-	is_dashing = true
+	var t = rig.get_magnet_target()
+	if t != null:
+		var to_t: Vector3 = t.global_position - player.global_position
+		to_t.y = 0.0
+		# Plus de test de distance : si le magnétisme l'a accroché, c'est
+		# qu'il est dans sa portée élargie — le poing peut l'atteindre.
+		dest = t.global_position
+		player.rotation.y = atan2(-to_t.x, -to_t.z)
+
+	_punch_t = 0.0
+	is_punching = true
 	_hit_list.clear()
-	_set_fists(false, true)   # seul le poing droit frappe pendant le dash
-
-	# Le poing vise un point fixe du monde : c'est là que le joueur s'arrêtera
-	rig.play_dash(_dash_power, _dash_start + _dash_dir * _dash_dist)
+	_set_fists(false, true)
+	rig.play_punch(_punch_power, dest)
 
 
-func _process_dash(delta: float) -> void:
-	_dash_t += delta
+func _process_punch(delta: float) -> void:
+	var total: float = punch_out_time + punch_hold_time + punch_back_time
+	_punch_t += delta
+	rig.set_punch_progress(_punch_t / total)
 
-	var spd: float = lerpf(dash_speed_min, dash_speed_max, _dash_power)
-	player.velocity.x = _dash_dir.x * spd
-	player.velocity.z = _dash_dir.z * spd
-
-	var hit_something: bool = _dash_hits()
-
-	# Le poing est synchronisé sur la distance parcourue, pas sur le temps :
-	# si le joueur percute un mur, le poing s'arrête pile là où il en est.
-	var travelled: float = Vector2(
-		player.global_position.x - _dash_start.x,
-		player.global_position.z - _dash_start.z
-	).length()
-	rig.set_dash_progress(clampf(travelled / maxf(_dash_dist, 0.01), 0.0, 1.0))
-
-	var blocked: bool = player.get_slide_collision_count() > 0 and _dash_t > 0.03
-
-	if hit_something or travelled >= _dash_dist or blocked or _dash_t >= dash_max_time:
-		player.velocity.x = 0.0
-		player.velocity.z = 0.0
-		is_dashing = false
+	# Le poing ne frappe qu'à l'aller et pendant l'arrêt : au retour il rentre
+	if _punch_t <= punch_out_time + punch_hold_time:
+		_punch_hits()
+	else:
 		_set_fists(false, false)
-		rig.end_dash()
+
+	if _punch_t >= total:
+		is_punching = false
+		_set_fists(false, false)
+		rig.end_punch()
 		_grace = chain_grace
 
 
-## Renvoie true si le poing a percuté un ennemi pendant le dash.
-func _dash_hits() -> bool:
-	var landed := false
+func _punch_hits() -> void:
+	if fist_r == null:
+		return
 
 	for area in fist_r.get_overlapping_areas():
 		var e = area.get_parent()
-		if e == null or e in _hit_list:
+		if e == null or not is_instance_valid(e) or e in _hit_list:
 			continue
 		if not e.has_method("take_hit"):
 			continue
 
 		_hit_list.append(e)
 
-		var dmg: int = maxi(1, int(round(lerpf(1.0, float(dash_damage), _dash_power))))
-		e.take_hit(_dash_dir, dmg)
+		var dir: Vector3 = e.global_position - player.global_position
+		dir.y = 0.0
+		if dir.length() > 0.01:
+			var dmg: int = maxi(1, int(round(lerpf(1.0, float(punch_damage), _punch_power))))
+			e.take_hit(dir.normalized(), dmg)
+
 		rig.hit_impact(1.0)
 		_hit_stop()
-		_shake(dash_shake * _dash_power)
-		landed = true
+		_shake(punch_shake * _punch_power)
 
-	return landed
+
+# ---------------------------------------------------------------- TOUPIE
+
+## La toupie ne se déclenche que près d'un ennemi étourdi : c'est ce qui en
+## fait une récompense du combo, pas un outil disponible en permanence.
+func _find_stunned_nearby():
+	for e in get_tree().get_nodes_in_group("enemy"):
+		if not is_instance_valid(e) or not e.has_method("is_stunned"):
+			continue
+		if not e.is_stunned():
+			continue
+		var v: Vector3 = e.global_position - player.global_position
+		v.y = 0.0
+		if v.length() <= spin_trigger_range:
+			return e
+	return null
+
+
+func _start_spin() -> void:
+	is_spinning = true
+	_spin_t = 0.0
+	_spin_hits.clear()
+	_step = 0
+	_t = 0.0
+	_grace = 0.0
+	_buffered = false
+	_press_t = -1.0
+	_set_fists(true, true)
+	rig.play_spin()
+
+
+func _process_spin(delta: float) -> void:
+	_spin_t += delta
+	rig.set_spin_progress(_spin_t / maxf(spin_duration, 0.01))
+
+	_spin_hits_check()
+
+	if _spin_t >= spin_duration:
+		is_spinning = false
+		_set_fists(false, false)
+		rig.end_spin()
+		_grace = chain_grace
+
+
+## Contrairement au combo, un même ennemi peut être touché plusieurs fois :
+## la toupie inflige des dégâts répétés tant qu'on reste dedans.
+func _spin_hits_check() -> void:
+	for fist in [fist_l, fist_r]:
+		if fist == null:
+			continue
+
+		for area in fist.get_overlapping_areas():
+			var e = area.get_parent()
+			if e == null or not is_instance_valid(e):
+				continue
+			if not e.has_method("take_hit"):
+				continue
+
+			var last: float = _spin_hits.get(e, -999.0)
+			if _spin_t - last < spin_tick:
+				continue
+			_spin_hits[e] = _spin_t
+
+			var dir: Vector3 = e.global_position - player.global_position
+			dir.y = 0.0
+			if dir.length() > 0.01:
+				e.take_hit(dir.normalized(), spin_damage)
+			_shake(spin_shake)
 
 
 # ---------------------------------------------------------------- RESSENTI
@@ -369,21 +488,12 @@ func _shake(strength: float) -> void:
 	if cam != null and cam.get_parent().has_method("shake"):
 		cam.get_parent().shake(strength)
 
-
-
-func _lunge(step: int) -> void:
-	var target: Node3D = rig.get_magnet_target()
-	if target == null or not is_instance_valid(target):
-		return
-
-	var to_e: Vector3 = target.global_position - player.global_position
-	to_e.y = 0.0
-	var d: float = to_e.length()
-	if d < lunge_standoff or d > lunge_range:
-		return
-
-	player.rotation.y = atan2(-to_e.x, -to_e.z)
-
-	var push: Vector3 = to_e.normalized() * lunge_speed[step - 1]
-	player.velocity.x = push.x
-	player.velocity.z = push.z
+## Ce que le clic droit ferait maintenant. Vide = rien de disponible.
+## Une seule touche pour plusieurs actions : c'est cette chaîne qui dit
+## au joueur laquelle, plutôt que de le laisser deviner.
+func get_available_action() -> String:
+	if is_spinning or is_charging or is_punching or player.is_dodging:
+		return ""
+	if _find_stunned_nearby() != null:
+		return "spin"
+	return ""

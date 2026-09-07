@@ -17,11 +17,18 @@ extends Node3D
 ##
 ## Ce script ne gère QUE le visuel. La logique d'attaque (input, combo, dégâts)
 ## vit dans Combat.gd, qui pilote ce rig via play_attack / set_attack_progress /
-## end_attack / play_charge / set_charge_progress / end_charge / play_dash /
-## set_dash_progress / end_dash / hit_impact, et lit get_attack_position et
+## end_attack / play_charge / set_charge_progress / end_charge / play_punch /
+## set_punch_progress / end_punch / hit_impact, et lit get_attack_position et
 ## get_magnet_target.
 
 @export var player_path: NodePath
+
+@export_group("Collision du rig")
+@export var clip_enabled: bool = true
+@export var body_clip_radius: float = 0.35   ## marge du buste au mur
+@export var hand_clip_radius: float = 0.20   ## marge du poing au mur
+@export var hand_stuck_time: float = 0.8     ## délai avant rappel de la main
+@export_flags_3d_physics var clip_mask: int = 1   ## calque du décor
 
 @export_group("Pieds")
 @export var stance_width: float = 0.30      ## écartement latéral des pieds
@@ -41,7 +48,7 @@ extends Node3D
 @export_group("Attraction par les mains")
 @export var punch_attract: float = 0.40     ## poids de la main pour un coup simple
 @export var slam_attract: float = 0.55      ## poids pour le coup 3
-@export var dash_attract: float = 1.0       ## poids pour le dash chargé
+@export var charged_attract: float = 0.70   ## poids pour le poing chargé
 @export var attract_speed: float = 12.0     ## vitesse de bascule entre pieds et main
 @export var attract_gap: float = 0.55       ## distance à laquelle le corps suit la main
 @export var attract_rise: float = 0.10      ## élévation du corps quand la main mène
@@ -101,15 +108,22 @@ extends Node3D
 @export var charge_crouch: float = 0.15     ## tassement du corps
 @export var charge_lean_back: float = 0.22  ## recul du corps pendant l'armement
 @export var charge_shake: float = 0.03      ## vibration à charge pleine
+@export var magnet_range_charged: float = 8.0
 
-@export_group("Dash chargé")
-@export var dash_lead_fraction: float = 0.35  ## le poing arrive à 35% du trajet
-@export var dash_hand_height: float = 0.85
-@export var dash_feet_trail: float = 0.55     ## retard des pieds derrière le corps
-@export var dash_feet_lift: float = 0.45      ## hauteur à laquelle ils pendent
-@export var dash_feet_spread: float = 0.22    ## écartement pendant le vol
-@export var dash_feet_catch: float = 6.0      ## vitesse de rattrapage du corps
-@export var dash_land_impulse: float = 2.2    ## encaissement à la réception
+
+
+@export_group("Toupie")
+@export var spin_radius: float = 0.95      ## rayon des poings pendant la rotation
+@export var spin_rate: float = 16.0        ## rad/s
+@export var spin_height: float = 0.75
+@export var spin_body_tilt: float = 8.0    ## léger penché, en degrés
+@export_group("Poing chargé")
+## Ces trois durées doivent correspondre à celles de Combat.gd, qui pilote
+## la progression : si elles divergent, le poing et sa hitbox se désynchronisent.
+@export var punch_out_time: float = 0.14    ## aller
+@export var punch_hold_time: float = 0.08   ## arrêt au bout
+@export var punch_back_time: float = 0.22   ## retour
+@export var punch_height: float = 0.85      ## hauteur de vol, relative au corps
 
 @export_group("Impact")
 @export var impact_hold: float = 0.10      ## durée du blocage du poing
@@ -148,9 +162,15 @@ var _body_vel := Vector3.ZERO
 
 var _was_dodging := false
 
+var _spinning: bool = false
+var _spin_k: float = 0.0
+var _spin_angle_t: float = 0.0
+
 ## Poids courant de l'attraction par la main : 0 = pieds seuls, 1 = main seule.
 ## Lissé pour éviter les à-coups au début et à la fin d'un coup.
 var _lead_w: float = 0.0
+
+var _stuck_t := [0.0, 0.0]   ## index 0 = gauche, 1 = droite
 
 ## Attaque : 0 = aucune, 1 = main droite, 2 = main gauche, 3 = slam deux mains
 var _atk_kind: int = 0
@@ -168,15 +188,14 @@ var _charge_k: float = 0.0
 var _spin_angle: float = 0.0
 var _charge_from := Vector3.ZERO   ## d'où la main part
 var _windup_t: float = 0.0         ## progression de la mise en place, 0 → 1
-var _dash_hit: bool = false
 
-## Dash : le poing se plante à un point fixe du monde, le corps vient l'y rejoindre
-var _dashing: bool = false
-var _dash_k: float = 0.0
-var _dash_power: float = 0.0
-var _dash_from := Vector3.ZERO
-var _dash_target := Vector3.ZERO
-var _fist_pos := Vector3.ZERO
+## Poing chargé : la main quitte le corps, vole, frappe, revient.
+## Le joueur, lui, ne bouge pas — c'est ce qui distingue cette attaque du dash.
+var _punching: bool = false
+var _punch_k: float = 0.0          ## progression 0 → 1 sur l'aller-retour complet
+var _punch_from := Vector3.ZERO
+var _punch_target := Vector3.ZERO
+var _punch_hit: bool = false       ## le poing a buté : il ne repart pas en avant
 
 ## Impact
 var _impact_t: float = 0.0
@@ -214,8 +233,9 @@ func _physics_process(delta: float) -> void:
 	# La cible est libre entre deux coups (le marqueur peut donc l'afficher en
 	# continu), mais verrouillée pendant une frappe : sinon le poing zigzaguerait
 	# entre deux ennemis en plein mouvement.
-	if _atk_kind == 0 and not _dashing:
+	if _atk_kind == 0 and not _punching:
 		_acquire_magnet()
+	
 
 	_update_lead(delta)
 	_update_feet(delta)
@@ -256,7 +276,10 @@ func _acquire_magnet() -> void:
 
 	var space := get_world_3d().direct_space_state
 	var shape := SphereShape3D.new()
-	shape.radius = magnet_range
+	# Portée élargie pendant la charge : le poing vole beaucoup plus loin
+	# qu'un coup au contact, la recherche doit suivre.
+	var reach: float = magnet_range_charged if _charging else magnet_range
+	shape.radius = reach
 
 	var params := PhysicsShapeQueryParameters3D.new()
 	params.shape = shape
@@ -287,14 +310,12 @@ func _acquire_magnet() -> void:
 		if align < half:
 			continue   # hors du cône : on ne frappe jamais dans le dos
 
-		# Proximité normalisée : 1 = collé, 0 = à la limite de portée
-		var near: float = 1.0 - clampf(d / magnet_range, 0.0, 1.0)
+		var near: float = 1.0 - clampf(d / reach, 0.0, 1.0)
 		var score: float = near + align * magnet_align_weight
 
 		if score > best_score:
 			best_score = score
 			_magnet_target = e
-
 
 ## Dévie une position de main vers la cible. Comme le corps est attiré par la
 ## main, tout le personnage suit — le magnétisme oriente donc la frappe entière.
@@ -319,8 +340,8 @@ func _magnetize(pos: Vector3) -> Vector3:
 
 ## Poids visé de l'attraction par la main, selon ce qui se passe.
 func _target_lead_weight() -> float:
-	if _dashing:
-		return dash_attract
+	if _punching:
+		return charged_attract
 	if _charging:
 		return 0.0          # la charge tire le corps en arrière, pas en avant
 	match _atk_kind:
@@ -339,7 +360,7 @@ func _update_lead(delta: float) -> void:
 ## La main qui mène le mouvement. Lue avec une frame de retard, ce qui est
 ## exactement ce qu'on veut : le corps réagit après la main, pas avec elle.
 func _lead_hand_position() -> Vector3:
-	if _dashing:
+	if _punching:
 		return hand_r.global_position
 	if _atk_kind == 3:
 		return (hand_l.global_position + hand_r.global_position) * 0.5
@@ -460,28 +481,24 @@ func end_charge() -> void:
 	_charging = false
 
 
-## target : le point du monde où le poing va se planter (fourni par Combat.gd)
-func play_dash(power: float, target: Vector3) -> void:
+## dest : le point du monde que le poing doit atteindre (fourni par Combat.gd,
+## qui a déjà résolu la cible et orienté le joueur).
+func play_punch(power: float, dest: Vector3) -> void:
 	_charging = false
-	_dashing = true
-	_dash_hit = false
-	_dash_k = 0.0
-	_dash_power = clampf(power, 0.0, 1.0)
-	_dash_from = hand_r.global_position
-	_dash_target = target + Vector3.UP * dash_hand_height
-	_acquire_magnet()
+	_punching = true
+	_punch_k = 0.0
+	_punch_hit = false
+	_punch_from = hand_r.global_position
+	_punch_target = dest
+	_punch_target.y = _body_pos.y + punch_height
 
 
-func set_dash_progress(k: float) -> void:
-	_dash_k = clampf(k, 0.0, 1.0)
+func set_punch_progress(k: float) -> void:
+	_punch_k = clampf(k, 0.0, 1.0)
 
 
-func end_dash() -> void:
-	_dashing = false
-	_body_vel.y -= dash_land_impulse
-	for f in _feet:
-		f.planted = _rest_target(f)
-		f.stepping = false
+func end_punch() -> void:
+	_punching = false
 
 
 ## Centre du cercle de charge : la position de repos de la main droite.
@@ -513,18 +530,47 @@ func _charge_hand_position(delta: float) -> Vector3:
 		+ fwd * sin(_spin_angle) * radius
 
 
-## Le poing atteint son point d'impact bien avant le joueur, puis l'attend.
-func _dash_hand_position() -> Vector3:
-	if _impact_t > 0.0 or _dash_hit:
-		return _impact_pos
-
-	var k: float = clampf(_dash_k / dash_lead_fraction, 0.0, 1.0)
-	var e: float = 1.0 - pow(1.0 - k, 3.0)
-	return _magnetize(_dash_from.lerp(_dash_target, e))
+## Position de repos de la main droite, dans le repère du corps incliné.
+func _hand_home() -> Vector3:
+	return body.global_position + body.global_transform.basis \
+		* Vector3(hand_offset.x, hand_offset.y, hand_offset.z)
 
 
-## Effets propres à la charge : tassement et recul. Le dash, lui, passe
-## entièrement par l'attraction unifiée de _update_body.
+## Aller vif, arrêt net, retour élastique. Le poing quitte vraiment le corps :
+## c'est ce détachement qui rend l'attaque lisible à distance.
+## Il réévalue sa cible à chaque frame : sans ça, un ennemi qui se décale
+## pendant le vol est raté alors que le joueur avait bien visé.
+func _punch_hand_position() -> Vector3:
+	var total: float = punch_out_time + punch_hold_time + punch_back_time
+	var t: float = _punch_k * total
+	var out_end: float = punch_out_time
+	var hold_end: float = punch_out_time + punch_hold_time
+
+	if _punch_hit:
+		if t < hold_end:
+			return _impact_pos
+		var kb: float = clampf((t - hold_end) / punch_back_time, 0.0, 1.0)
+		return _impact_pos.lerp(_hand_home(), kb * kb)
+
+	# Destination réévaluée : le poing suit sa cible si elle bouge
+	var dest: Vector3 = _punch_target
+	var tgt = get_magnet_target()
+	if tgt != null:
+		dest = tgt.global_position
+		dest.y = _body_pos.y + punch_height
+
+	if t < out_end:
+		var k: float = t / out_end
+		return _punch_from.lerp(dest, 1.0 - pow(1.0 - k, 3.0))
+
+	if t < hold_end:
+		return dest
+
+	var kb: float = clampf((t - hold_end) / punch_back_time, 0.0, 1.0)
+	return dest.lerp(_hand_home(), kb * kb)
+
+
+## Effets propres à la charge : tassement et recul.
 func _update_charge_body() -> void:
 	if not _charging:
 		return
@@ -575,12 +621,9 @@ func _rest_target(f: Foot) -> Vector3:
 	return p
 
 
+## Les pieds marchent normalement même pendant le poing chargé : le joueur
+## reste au sol, seul son bras part. C'est la différence avec l'ancien dash.
 func _update_feet(delta: float) -> void:
-	# Pendant le dash, les pieds ne marchent plus : ils traînent derrière le corps
-	if _dashing:
-		_update_dash_feet(delta)
-		return
-
 	# Au démarrage de l'esquive, les deux pieds décollent ensemble : ça fait un bond
 	if player.is_dodging and not _was_dodging:
 		for f in _feet:
@@ -633,25 +676,6 @@ func _update_feet(delta: float) -> void:
 			_body_vel += dir.normalized() * push_impulse
 
 
-## Les pieds pendent derrière le corps, comme emportés par le poids du poing.
-func _update_dash_feet(delta: float) -> void:
-	var fwd: Vector3 = -player.global_transform.basis.z
-	var right: Vector3 = player.global_transform.basis.x
-	var t: float = 1.0 - exp(-dash_feet_catch * delta)
-
-	for f in _feet:
-		var target: Vector3 = body.global_position \
-			- fwd * dash_feet_trail \
-			- Vector3.UP * dash_feet_lift \
-			+ right * f.side * dash_feet_spread
-
-		f.node.global_position = f.node.global_position.lerp(target, t)
-		f.stepping = false
-		f.t = 0.0
-		# Le pied "atterrit" là où il est : évite un retour brutal à la fin du dash
-		f.planted = _rest_target(f)
-
-
 # ---------------------------------------------------------------- CORPS
 
 func _update_body(delta: float) -> void:
@@ -680,6 +704,20 @@ func _update_body(delta: float) -> void:
 	_body_vel += to_target * stiffness * delta
 	_body_vel *= exp(-damping * delta)
 	_body_pos += _body_vel * delta
+
+	if clip_enabled:
+		var anchor: Vector3 = player.global_position + Vector3.UP * body_height
+		var clipped: Vector3 = _clip(anchor, _body_pos, body_clip_radius)
+		if clipped != _body_pos:
+			# On tue la vitesse qui pousse dans le mur, sinon le corps vibre
+			var into: Vector3 = _body_pos - clipped
+			into.y = 0.0
+			if into.length() > 0.01:
+				var n: Vector3 = -into.normalized()
+				var v: float = _body_vel.dot(n)
+				if v < 0.0:
+					_body_vel -= n * v
+			_body_pos = clipped
 
 	# --- Rythme des pas : rapide, hors ressort ---
 	var step_t := -1.0
@@ -726,6 +764,10 @@ func _update_body(delta: float) -> void:
 		t
 	) + sway
 
+	if _spinning:
+		body.rotation.y = _spin_angle_t
+		body.rotation.x = deg_to_rad(spin_body_tilt) * _spin_k
+
 
 # ---------------------------------------------------------------- MAINS
 
@@ -737,13 +779,13 @@ func _update_hands(delta: float) -> void:
 	if _atk_kind == 0 and _recover_t > 0.0:
 		_recover_t = maxf(_recover_t - delta, 0.0)
 
-	# La position de charge est calculée une seule fois par frame : l'angle de
-	# rotation s'incrémente dedans, l'appeler par main le ferait tourner double.
-	var charge_pos := Vector3.ZERO
+	# Ces positions sont calculées une seule fois par frame : l'angle de rotation
+	# de la charge s'incrémente dedans, l'appeler par main le ferait tourner double.
+	var driven_pos := Vector3.ZERO
 	if _charging:
-		charge_pos = _charge_hand_position(delta)
-	elif _dashing:
-		_fist_pos = _dash_hand_position()
+		driven_pos = _charge_hand_position(delta)
+	elif _punching:
+		driven_pos = _punch_hand_position()
 
 	# --- Balancement : la main opposée au pied en l'air part devant ---
 	var swing := 0.0
@@ -760,10 +802,26 @@ func _update_hands(delta: float) -> void:
 
 	for h in _hands:
 		var local := Vector3(hand_offset.x * h.side, hand_offset.y, hand_offset.z)
+		if _spinning:
+			h.pos = _spin_hand_position(h.side, delta)
+			h.vel = Vector3.ZERO
+			h.node.global_position = h.pos
+			h.node.rotation = body.rotation
+			continue
 		if h.side == swing_side:
 			local.z -= swing   # -Z = avant en Godot
 		else:
 			local.z += swing * 0.6
+
+		# --- Charge et poing chargé : seule la main droite est pilotée ---
+		# Testé AVANT l'impact : pendant le poing chargé, c'est
+		# _punch_hand_position qui gère le blocage sur la cible.
+		if h.side > 0.0 and (_charging or _punching):
+			h.pos = driven_pos
+			h.vel = Vector3.ZERO
+			h.node.global_position = h.pos
+			h.node.rotation = body.rotation
+			continue
 
 		# --- Impact : le poing est bloqué là où il a touché ---
 		if _impact_t > 0.0 and (_impact_side == 0.0 or h.side == _impact_side):
@@ -774,14 +832,6 @@ func _update_hands(delta: float) -> void:
 			continue
 
 		var target: Vector3 = body.global_position + b * local
-
-		# --- Charge et dash : seul le poing droit est piloté ---
-		if h.side > 0.0 and (_charging or _dashing):
-			h.pos = charge_pos if _charging else _fist_pos
-			h.vel = Vector3.ZERO
-			h.node.global_position = h.pos
-			h.node.rotation = body.rotation
-			continue
 
 		# --- Cette main est-elle pilotée par l'attaque en cours ? ---
 		var driven := false
@@ -808,6 +858,27 @@ func _update_hands(delta: float) -> void:
 		h.vel *= exp(-hand_damping * delta)
 		h.pos += h.vel * delta
 
+		var idx: int = 1 if h.side > 0.0 else 0
+		var clipped: Vector3 = _clip(body.global_position, h.pos, hand_clip_radius)
+
+		if clipped.distance_to(h.pos) > 0.02:
+			_stuck_t[idx] += delta
+			h.pos = clipped
+			h.vel = Vector3.ZERO
+
+			# Bloquée trop longtemps : elle rentre plutôt que de rester plaquée
+			# contre le mur, ce qui se lit comme un bug.
+			if _stuck_t[idx] >= hand_stuck_time:
+				_stuck_t[idx] = 0.0
+				h.pos = body.global_position + b * Vector3(
+					hand_offset.x * h.side, hand_offset.y, hand_offset.z
+				)
+		else:
+			_stuck_t[idx] = 0.0
+
+		h.node.global_position = h.pos
+		h.node.rotation = body.rotation
+
 		h.node.global_position = h.pos
 		h.node.rotation = body.rotation
 
@@ -823,6 +894,74 @@ func hit_impact(side: float) -> void:
 	if back.length() > 0.01:
 		current += back.normalized() * impact_recoil
 
-	if _dashing:
-		_dash_hit = true
 	_impact_pos = current
+
+	if _punching:
+		_punch_hit = true
+
+func play_spin() -> void:
+	_spinning = true
+	_spin_k = 0.0
+	_spin_angle_t = 0.0
+
+
+func set_spin_progress(k: float) -> void:
+	_spin_k = clampf(k, 0.0, 1.0)
+
+
+func end_spin() -> void:
+	_spinning = false
+
+
+## Les deux poings tournent en opposition, à hauteur de torse. Le rayon
+## s'ouvre au démarrage et se referme à la fin : sans ça, les bras
+## apparaissent et disparaissent d'un coup.
+func _spin_hand_position(side: float, delta: float) -> Vector3:
+	if side > 0.0:
+		_spin_angle_t += spin_rate * delta   # incrémenté une seule fois
+
+	# Ouverture/fermeture sur les 15 premiers et derniers pourcents
+	var open: float = clampf(_spin_k / 0.15, 0.0, 1.0)
+	var close: float = clampf((1.0 - _spin_k) / 0.15, 0.0, 1.0)
+	var r: float = spin_radius * minf(open, close)
+
+	var a: float = _spin_angle_t + (0.0 if side > 0.0 else PI)
+	var center: Vector3 = _body_pos + Vector3.UP * (spin_height - body_height)
+
+	return center + Vector3(cos(a), 0.0, sin(a)) * r
+
+
+## Empêche une partie du rig de traverser le décor. Le rayon part de l'ancre
+## (toujours dans un espace libre) et va vers la partie ; le premier mur
+## rencontré devient la limite, décalée de la marge.
+##
+## Le rayon est forcé à l'horizontale : sinon il touche le sol dès que la
+## partie descend, et la plaque n'importe où.
+func _clip(from: Vector3, to: Vector3, radius: float) -> Vector3:
+	if not clip_enabled:
+		return to
+
+	var a := from
+	var b := to
+	b.y = a.y   # test horizontal uniquement
+
+	if a.distance_to(b) < 0.05:
+		return to
+
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(a, b)
+	q.exclude = [player.get_rid()]
+	q.collision_mask = clip_mask
+
+	var hit := space.intersect_ray(q)
+	if hit.is_empty():
+		return to
+
+	var n: Vector3 = hit.normal
+	n.y = 0.0
+	if n.length() < 0.01:
+		return to
+
+	var clipped: Vector3 = hit.position + n.normalized() * radius
+	clipped.y = to.y   # on garde la hauteur d'origine
+	return clipped

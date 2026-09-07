@@ -12,7 +12,6 @@
 [ext_resource type="Script" uid="uid://bu30rgwlf06jo" path="res://Script/player/secondaire_lock.gd" id="9_bdiev"]
 [ext_resource type="PackedScene" uid="uid://c732lgsxwdwcw" path="res://prefab/Enemy/EnemyShooter.tscn" id="10_b7scd"]
 [ext_resource type="PackedScene" uid="uid://uadbmatn651" path="res://prefab/Enemy/EnemyBomber.tscn" id="12_bdiev"]
-[ext_resource type="PackedScene" uid="uid://cgvh4bybr63w8" path="res://prefab/Enemy/Boss/1Boss.tscn" id="13_pnog0"]
 
 [sub_resource type="Environment" id="Environment_osq7l"]
 
@@ -171,7 +170,6 @@ script = ExtResource("9_35ann")
 player_path = NodePath("../Player")
 charger_scene = ExtResource("1_ypt0w")
 shooter_scene = ExtResource("10_b7scd")
-bomber_scene = ExtResource("12_bdiev")
-boss_scene = ExtResource("13_pnog0")
-room_size = Vector2(30, 30)
+room_size = Vector2(25, 25)
 platform_size = Vector3(6, 0.35, 5)
+bomber_scene = ExtResource("12_bdiev")
