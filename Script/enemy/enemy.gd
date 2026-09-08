@@ -108,7 +108,7 @@ func _ready() -> void:
 	add_to_group("enemy")
 	health = max_health
 	_base_scale = mesh.scale
-
+	_stun_base_y = mesh.position.y
 	_mat = mesh.get_active_material(0).duplicate()
 	mesh.material_override = _mat
 	_base_color = _mat.albedo_color

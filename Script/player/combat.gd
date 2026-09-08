@@ -206,7 +206,7 @@ func _start(step: int) -> void:
 	_hit_list.clear()
 	rig.play_attack(step)
 
-	_lunge(step)
+	##_lunge(step)
 
 	if step == 3:
 		_hop()

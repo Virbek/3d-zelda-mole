@@ -82,7 +82,6 @@ func _ready() -> void:
 
 	health = max_health
 	_base_scale = mesh.scale
-
 	var base := mesh.get_active_material(0)
 	_mat = base.duplicate() if base != null else StandardMaterial3D.new()
 	mesh.material_override = _mat

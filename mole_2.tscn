@@ -1,0 +1,5 @@
+[gd_scene format=3 uid="uid://caolsnbsspier"]
+
+[ext_resource type="PackedScene" uid="uid://b6xdjmes871lx" path="res://Asset/Mole2.fbx" id="1_mvuwf"]
+
+[node name="Mole2" unique_id=765459072 instance=ExtResource("1_mvuwf")]

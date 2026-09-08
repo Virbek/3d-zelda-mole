@@ -76,7 +76,10 @@ var _jumps_left: int = 0
 var _zone: Node3D = null
 var _start_pos := Vector3.ZERO
 var _land_pos := Vector3.ZERO
+var _landed_resolved: bool = false
 var _ground_y: float = 0.0
+var _mesh_rest_y: float = 0.0
+var _mesh_local_bottom: float = 0.0
 
 var _mat: StandardMaterial3D
 var _base_color: Color
@@ -96,6 +99,9 @@ func _ready() -> void:
 
 	health = max_health
 	_base_scale = mesh.scale
+	_mesh_rest_y = mesh.position.y
+	if mesh.mesh != null:
+		_mesh_local_bottom = mesh.mesh.get_aabb().position.y
 	_ground_y = global_position.y
 
 	var base := mesh.get_active_material(0)
@@ -156,7 +162,7 @@ func _start_jump() -> void:
 func _windup(_delta: float) -> void:
 	var k: float = clampf(_t / maxf(windup_time, 0.01), 0.0, 1.0)
 	var s: float = 1.0 - squash_amount * k
-	mesh.scale = _base_scale * Vector3(1.0 + squash_amount * k * 0.6, s, 1.0 + squash_amount * k * 0.6)
+	_set_mesh_scale(_base_scale * Vector3(1.0 + squash_amount * k * 0.6, s, 1.0 + squash_amount * k * 0.6))
 	_face_player()
 
 	if _t >= windup_time:
@@ -166,7 +172,7 @@ func _windup(_delta: float) -> void:
 func _launch() -> void:
 	_start_pos = global_position
 	_land_pos = global_position
-	mesh.scale = _base_scale
+	_set_mesh_scale(_base_scale)
 	_mat.albedo_color = _base_color
 
 	_spawn_zone()
@@ -184,12 +190,12 @@ func _airborne(_delta: float) -> void:
 		var k: float = _t / rise_time
 		var e: float = 1.0 - pow(1.0 - k, 2.0)
 		global_position.y = _ground_y + hover_height * e
-		mesh.scale = _base_scale * Vector3(0.85, 1.25, 0.85)
+		_set_mesh_scale(_base_scale * Vector3(0.85, 1.25, 0.85))
 
 	elif _t < fall_start:
 		# Suspension : il flotte pendant que le joueur lit la zone
 		global_position.y = _ground_y + hover_height
-		mesh.scale = _base_scale
+		_set_mesh_scale(_base_scale)
 
 		# Tant que la zone n'est pas verrouillée, il se place au-dessus d'elle
 		if _zone != null and is_instance_valid(_zone) and not _zone.is_locked():
@@ -204,7 +210,7 @@ func _airborne(_delta: float) -> void:
 		global_position.y = lerpf(_ground_y + hover_height, _ground_y, e)
 		global_position.x = lerpf(global_position.x, _land_pos.x, e)
 		global_position.z = lerpf(global_position.z, _land_pos.z, e)
-		mesh.scale = _base_scale * Vector3(0.8, 1.35, 0.8)
+		_set_mesh_scale(_base_scale * Vector3(0.8, 1.35, 0.8))
 
 		if k >= 1.0:
 			_impact()
@@ -212,9 +218,10 @@ func _airborne(_delta: float) -> void:
 
 func _impact() -> void:
 	global_position.y = _ground_y
-	mesh.scale = _base_scale * Vector3(1.0 + squash_amount, 1.0 - squash_amount, 1.0 + squash_amount)
+	_set_mesh_scale(_base_scale * Vector3(1.0 + squash_amount, 1.0 - squash_amount, 1.0 + squash_amount))
 
 	_shake(land_shake)
+	_landed_resolved = false
 	_set_state(State.LANDED)
 
 
@@ -223,15 +230,15 @@ func _impact() -> void:
 func _landed(_delta: float) -> void:
 	var k: float = clampf(_t / maxf(land_time, 0.01), 0.0, 1.0)
 	var e: float = 1.0 - pow(1.0 - k, 3.0)
-	mesh.scale = _base_scale.lerp(_base_scale, e)
-	mesh.scale = _base_scale * Vector3(
-		lerpf(1.0 + squash_amount, 1.0, e),
-		lerpf(1.0 - squash_amount, 1.0, e),
-		lerpf(1.0 + squash_amount, 1.0, e)
-	)
+	_set_mesh_scale(_base_scale * Vector3(
+  	lerpf(1.0 + squash_amount, 1.0, e),
+  	lerpf(1.0 - squash_amount, 1.0, e),
+  	lerpf(1.0 + squash_amount, 1.0, e)
+  ))
 
-	if _t < land_time:
+	if _t < land_time or _landed_resolved:
 		return
+	_landed_resolved = true
 
 	_jumps_left -= 1
 	if _jumps_left > 0:
@@ -285,6 +292,13 @@ func _face_player() -> void:
 	if v.length() > 0.01:
 		rotation.y = lerp_angle(rotation.y, atan2(-v.x, -v.z), 0.15)
 
+## Le squash s'applique autour du pivot du mesh. Si ce pivot n'est pas à la
+## base du modèle, rétrécir mesh.scale.y donne l'impression que le boss
+## s'enfonce dans le sol. On compense en ancrant la base visuelle au niveau
+## du sol, quelle que soit l'échelle appliquée.
+func _set_mesh_scale(s: Vector3) -> void:
+	mesh.scale = s
+	mesh.position.y = _mesh_rest_y + _mesh_local_bottom * (_base_scale.y - s.y)
 
 func _shake(strength: float) -> void:
 	var cam := get_viewport().get_camera_3d()

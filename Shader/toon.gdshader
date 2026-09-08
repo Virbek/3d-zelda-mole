@@ -9,6 +9,7 @@ uniform int shade_steps : hint_range(2, 6) = 3;
 uniform float shade_softness : hint_range(0.0, 0.5) = 0.05;
 
 uniform vec4 shadow_color : source_color = vec4(0.3, 0.2, 0.2, 1.0);
+uniform float ambient_floor : hint_range(0.0, 1.0) = 0.15;
 
 void fragment() {
 	vec4 base_color = albedo_color;
@@ -28,7 +29,7 @@ void light() {
 	banded = smoothstep(0.0, shade_softness, ndotl - banded * (1.0 - shade_softness));
 	banded = clamp(banded + floor(ndotl * steps) / steps, 0.0, 1.0);
 
-	vec3 lit_color = mix(shadow_color.rgb * ALBEDO, ALBEDO, banded);
+	vec3 lit_color = mix(shadow_color.rgb * ALBEDO, ALBEDO, max(banded, ambient_floor));
 
 	DIFFUSE_LIGHT += lit_color * ATTENUATION * LIGHT_COLOR;
 }

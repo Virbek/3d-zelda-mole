@@ -25,6 +25,15 @@ extends Node3D
 @export var threat_zoom: float = 2.0         ## dézoom quand des ennemis sont proches
 @export var threat_smoothing: float = 3.0    ## lissage du barycentre
 
+@export_group("Occlusion")
+@export var occlusion_enabled: bool = true
+@export var occlusion_mask: int = 1        ## calque du décor (murs, piliers, rampe)
+@export var occlusion_alpha: float = 0.25  ## transparence de ce qui bloque la vue
+@export var occlusion_fade_speed: float = 10.0
+@export var occlusion_max_hits: int = 4    ## sécurité si plusieurs objets s'alignent
+
+var _faded: Dictionary = {}   ## nœud visuel → alpha courant
+
 var _threat := Vector3.ZERO
 var _threat_w: float = 0.0
 
@@ -45,6 +54,7 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_update_threat(delta)
+	_update_occlusion(delta)
 
 	var focus: Vector3 = target.global_position + Vector3.UP * height_offset
 	if _threat_w > 0.01:
@@ -106,3 +116,65 @@ func _update_threat(delta: float) -> void:
 		_threat_w = lerpf(_threat_w, clampf(total, 0.0, 1.0), t)
 	else:
 		_threat_w = lerpf(_threat_w, 0.0, t)
+
+## Rayon caméra → joueur. Ce qu'il traverse sur occlusion_mask est estompé ;
+## on répète le tir en excluant ce qui vient d'être touché, pour attraper
+## plusieurs objets alignés (deux piliers l'un derrière l'autre, par exemple).
+func _update_occlusion(delta: float) -> void:
+	if not occlusion_enabled or target == null:
+		return
+
+	var space := get_world_3d().direct_space_state
+	var from: Vector3 = cam.global_position
+	var to: Vector3 = target.global_position + Vector3.UP * height_offset
+
+	var blocking: Dictionary = {}
+	var exclude: Array = []
+
+	for i in occlusion_max_hits:
+		var q := PhysicsRayQueryParameters3D.create(from, to)
+		q.collision_mask = occlusion_mask
+		q.exclude = exclude
+		var hit := space.intersect_ray(q)
+		if hit.is_empty():
+			break
+
+		var visual = hit.collider.get_meta("visual") if hit.collider.has_meta("visual") else null
+		if visual != null and is_instance_valid(visual):
+			blocking[visual] = true
+			if not _faded.has(visual):
+				_faded[visual] = 1.0
+				_set_transparent(visual, true)
+
+		exclude.append(hit.collider.get_rid())
+
+	var t: float = 1.0 - exp(-occlusion_fade_speed * delta)
+	var done: Array = []
+
+	for visual in _faded.keys():
+		var wanted: float = occlusion_alpha if blocking.has(visual) else 1.0
+		var a: float = lerpf(_faded[visual], wanted, t)
+		_faded[visual] = a
+		_apply_alpha(visual, a)
+
+		if not blocking.has(visual) and absf(a - 1.0) < 0.01:
+			_apply_alpha(visual, 1.0)
+			_set_transparent(visual, false)
+			done.append(visual)
+
+	for visual in done:
+		_faded.erase(visual)
+
+
+func _set_transparent(visual: Node3D, on: bool) -> void:
+	var mat: StandardMaterial3D = visual.material
+	if mat == null:
+		return
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA if on else BaseMaterial3D.TRANSPARENCY_DISABLED
+
+
+func _apply_alpha(visual: Node3D, a: float) -> void:
+	var mat: StandardMaterial3D = visual.material
+	if mat == null:
+		return
+	mat.albedo_color.a = a

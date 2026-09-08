@@ -155,7 +155,7 @@ func _add_ramp(platform_pos: Vector3) -> void:
 		ramp_width if along_x else ramp_length
 	)
 	box.position = center
-	box.use_collision = true
+	box.use_collision = false
 
 	var angle: float = atan2(h, ramp_length)
 	if along_x:
@@ -166,23 +166,48 @@ func _add_ramp(platform_pos: Vector3) -> void:
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = pillar_color
 	box.material = mat
+	var rot := Vector3.ZERO
+	if along_x:
+		rot.z = angle * sx
+	else:
+		rot.x = -angle * sz
 	add_child(box)
+	_add_box_collision("RampCollision", box.size, center, rot, box)
+	
 
 
-## CSGBox3D plutôt que MeshInstance + StaticBody : une seule ligne pour avoir
-## la collision, et le résultat reste éditable à la main si besoin.
 func _add_box(n: String, size: Vector3, pos: Vector3, color: Color) -> void:
 	var box := CSGBox3D.new()
 	box.name = n
 	box.size = size
 	box.position = pos
-	box.use_collision = true
+	box.use_collision = false   # la collision vient du StaticBody3D ci-dessous, pas du CSG
 
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
 	box.material = mat
 
 	add_child(box)
+	_add_box_collision(n + "Collision", size, pos, Vector3.ZERO, box)
+
+
+## Collision en forme primitive (BoxShape3D), séparée du visuel CSG.
+## On mémorise le nœud visuel en métadonnée : c'est ce qui permet à la caméra
+## de retrouver quoi rendre transparent quand ce corps bloque la vue.
+func _add_box_collision(n: String, size: Vector3, pos: Vector3, rot: Vector3, visual: Node3D) -> void:
+	var body := StaticBody3D.new()
+	body.name = n
+	body.position = pos
+	body.rotation = rot
+	body.set_meta("visual", visual)
+
+	var shape := CollisionShape3D.new()
+	var box_shape := BoxShape3D.new()
+	box_shape.size = size
+	shape.shape = box_shape
+	body.add_child(shape)
+
+	add_child(body)
 
 
 # ---------------------------------------------------------------- SPAWNS

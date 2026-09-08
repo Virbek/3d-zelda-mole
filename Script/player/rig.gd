@@ -60,6 +60,8 @@ extends Node3D
 @export var magnet_strength: float = 0.75    ## 0 = aucun, 1 = le poing va pile dessus
 @export var magnet_align_weight: float = 2.2 ## poids de l'alignement face à la distance
 @export var magnet_standoff: float = 0.5     ## le poing s'arrête devant, pas dedans
+@export var magnet_ramp_start: float = 0.35  ## avant ce point du coup (0-1) : aucune correction, l'arc est pur
+@export var magnet_ramp_end: float = 0.85    ## à partir de ce point : correction à pleine puissance
 @export_flags_3d_physics var magnet_mask: int = 2
 
 @export_group("Ressenti des pas")
@@ -319,12 +321,16 @@ func _acquire_magnet() -> void:
 
 ## Dévie une position de main vers la cible. Comme le corps est attiré par la
 ## main, tout le personnage suit — le magnétisme oriente donc la frappe entière.
-func _magnetize(pos: Vector3) -> Vector3:
-	var t = get_magnet_target()
-	if t == null:
+##
+## La correction est nulle en début de coup et monte progressivement : sans
+## cette rampe, la main est tirée vers la cible dès la première frame et
+## l'arc de l'animation ne se voit plus, ça a l'air d'un téléport.
+func _magnetize(pos: Vector3, t: float) -> Vector3:
+	var target = get_magnet_target()
+	if target == null:
 		return pos
 
-	var aim: Vector3 = t.global_position
+	var aim: Vector3 = target.global_position
 	aim.y = pos.y   # on ne corrige que l'horizontale
 
 	# Le poing s'arrête devant l'ennemi, pas dedans
@@ -333,7 +339,10 @@ func _magnetize(pos: Vector3) -> Vector3:
 	if d > 0.01:
 		aim = _body_pos + to_aim / d * maxf(d - magnet_standoff, 0.3)
 
-	return pos.lerp(aim, magnet_strength)
+	var ramp: float = clampf(
+		inverse_lerp(magnet_ramp_start, magnet_ramp_end, t), 0.0, 1.0
+	)
+	return pos.lerp(aim, magnet_strength * ramp)
 
 
 # ------------------------------------------------------- ATTRACTION UNIFIÉE
@@ -389,12 +398,10 @@ func end_attack() -> void:
 	_atk_kind = 0
 	_recover_t = attack_recover
 
-
-## Position d'une main à l'instant t. side : 1 = droite, -1 = gauche
 func get_attack_position(t: float, side: float) -> Vector3:
 	var p: Vector3 = _slam_position(t, side) if _atk_kind == 3 \
 		else _sweep_position(t, side)
-	return _magnetize(p)
+	return _magnetize(p, t)
 
 
 ## Balayage circulaire horizontal.
