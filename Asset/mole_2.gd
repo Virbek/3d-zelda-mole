@@ -24,6 +24,7 @@ func _apply_to_all(node: Node) -> void:
 	for child in node.get_children():
 		_apply_to_all(child)
 
+
 func _apply_toon(mesh_instance: MeshInstance3D, surface: int) -> void:
 	var original: Material = mesh_instance.get_active_material(surface)
 	var tex: Texture2D = null
@@ -35,6 +36,7 @@ func _apply_toon(mesh_instance: MeshInstance3D, surface: int) -> void:
 	toon_mat.set_shader_parameter("use_texture", tex != null)
 	if tex != null:
 		toon_mat.set_shader_parameter("albedo_texture", tex)
+		toon_mat.set_shader_parameter("albedo_color", Color(1.0, 1.0, 1.0, 1.0))
 
 	# Les pièces fines (planes) font du z-fighting si on gonfle leurs deux
 	# faces le long de normales opposées : on leur retire simplement le

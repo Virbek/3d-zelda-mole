@@ -68,11 +68,16 @@ var _alive: int = 0
 var _running: bool = false
 var _boss_phase: bool = false
 var _spawn_points: Array[Vector3] = []
+var _spawned: Array[Node] = []
 
 
 func _ready() -> void:
 	_build_room()
 	_collect_spawn_points()
+
+	# L'entrée de l'arène sert de premier checkpoint implicite, tant que le
+	# joueur n'en a pas franchi un vrai posé dans la map.
+	Checkpoints.set_checkpoint(player.global_position)
 
 	await get_tree().create_timer(start_delay).timeout
 	_next_wave()
@@ -309,6 +314,7 @@ func _spawn(scene: PackedScene, pos: Vector3) -> void:
 
 	add_child(e)
 	e.global_position = global_position + pos
+	_spawned.append(e)
 
 	if e.has_signal("died"):
 		e.died.connect(_on_enemy_died)
@@ -362,9 +368,29 @@ func _start_boss() -> void:
 	b.player_path = player.get_path()
 	add_child(b)
 	b.global_position = pos
+	_spawned.append(b)
 
 	if b.has_signal("died"):
 		b.died.connect(_on_enemy_died)
 
 	_alive = 1
 	boss_started.emit()
+
+
+# ---------------------------------------------------------------- CHECKPOINT
+
+## Vide tout ce qui a été spawné et repart de la première vague. Appelé par
+## Checkpoints après une mort du joueur.
+func reset_encounter() -> void:
+	for e in _spawned:
+		if is_instance_valid(e):
+			e.queue_free()
+	_spawned.clear()
+
+	_wave = -1
+	_alive = 0
+	_running = false
+	_boss_phase = false
+
+	await get_tree().create_timer(start_delay).timeout
+	_next_wave()

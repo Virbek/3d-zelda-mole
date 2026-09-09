@@ -41,6 +41,10 @@ signal died
 @export var charge_damage: int = 1
 @export var charge_cooldown: float = 1.2
 
+@export_group("Couloir de charge")
+@export var charge_zone_scene: PackedScene
+@export var charge_width: float = 1.4      ## largeur du couloir affiché au sol
+
 @export_group("Encerclement")
 @export var circle_distance: float = 4.5
 @export var circle_speed: float = 2.2
@@ -70,10 +74,15 @@ signal died
 @export var stun_duration: float = 3.0
 @export var stun_color := Color(0.25, 1.0, 0.35)
 @export var stun_wobble: float = 0.12   ## amplitude du vacillement
+@export var stun_hits_required: int = 6     ## nombre de coups pour étourdir
+@export var stun_drain_delay: float = 0.6   ## temps sans coup avant que la jauge commence à redescendre
+@export var stun_drain_rate: float = 0.8    ## coups perdus par seconde, une fois la latence passée
+@export var reaction: String = "spin"       ## ce que déclenche la commande réaction une fois étourdi
 
 var player: CharacterBody3D = null
 @onready var mesh: MeshInstance3D = $MeshInstance3D
 @onready var health_bar: Node3D = $HealthBar
+@onready var stun_bar: Node3D = get_node_or_null("StunBar")
 @onready var hurt_box: Area3D = $HurtBox
 @onready var attack_box: Area3D = $AttackBox
 
@@ -89,6 +98,9 @@ var _charge_dir := Vector3.ZERO
 var _charge_start := Vector3.ZERO
 var _knockback := Vector3.ZERO
 var _hit_player := false             ## un seul dégât par charge
+var _charge_zone: Node3D = null       ## un seul dégât par charge
+var _stun_bar: float = 0.0
+var _stun_idle_t: float = 0.0
 
 var _stun_base_y: float = 0.0
 
@@ -123,6 +135,13 @@ func _physics_process(delta: float) -> void:
 	_t += delta
 	if _cooldown > 0.0:
 		_cooldown = maxf(_cooldown - delta, 0.0)
+
+	if state != State.STUNNED and state != State.DEAD and _stun_bar > 0.0:
+		_stun_idle_t += delta
+		if _stun_idle_t >= stun_drain_delay:
+			_stun_bar = maxf(_stun_bar - stun_drain_rate * delta, 0.0)
+			if stun_bar != null:
+				stun_bar.set_ratio(_stun_bar / float(stun_hits_required))
 
 	match state:
 		State.IDLE:
@@ -209,10 +228,10 @@ func _telegraph(delta: float) -> void:
 	velocity.x = 0.0
 	velocity.z = 0.0
 
-	# Il continue de viser pendant l'armement : le joueur doit vraiment esquiver,
-	# pas juste marcher sur le côté
-	var dir: Vector3 = _dir_to_player()
-	_face(dir, delta * 0.6)
+	# La direction est déjà figée au tout début du télégraphe (voir
+	# _start_telegraph) : on aligne le corps dessus plutôt que de continuer
+	# à viser, pour que le couloir affiché au sol reste vrai jusqu'au bout.
+	_face(_charge_dir, delta * 0.6)
 
 	# Léger tassement puis détente, comme un ressort qu'on comprime
 	var k: float = _t / telegraph_time
@@ -223,8 +242,6 @@ func _telegraph(delta: float) -> void:
 	)
 
 	if _t >= telegraph_time:
-		_charge_dir = _dir_to_player()
-		_charge_start = global_position
 		_hit_player = false
 		attack_box.monitoring = true
 		mesh.scale = _base_scale
@@ -245,10 +262,10 @@ func _charge(_delta: float) -> void:
 	var blocked: bool = get_slide_collision_count() > 0 and _t > 0.05
 
 	if travelled >= charge_distance or blocked or _t >= charge_max_time:
-		# Choc contre un mur ou un autre ennemi : arrêt net, pas de glissade
-		if blocked:
-			velocity.x = 0.0
-			velocity.z = 0.0
+		# Arrêt net dans tous les cas — sans ça, la vitesse de charge reste
+		# active une frame de trop et le chargeur dépasse la zone affichée.
+		velocity.x = 0.0
+		velocity.z = 0.0
 		attack_box.monitoring = false
 		AttackToken.release(self)
 		_cooldown = charge_cooldown
@@ -315,6 +332,20 @@ func _start_telegraph() -> void:
 	_tele_tween.tween_property(_mat, "albedo_color", telegraph_color, telegraph_time * 0.7)
 	_tele_tween.tween_property(_mat, "albedo_color", _base_color, telegraph_time * 0.3)
 
+	# La charge est décidée dès maintenant, pas à la fin du télégraphe : le
+	# couloir affiché au sol doit être la vérité dès la première frame.
+	_charge_dir = _dir_to_player()
+	_charge_start = global_position
+	_spawn_charge_zone()
+
+
+func _spawn_charge_zone() -> void:
+	if charge_zone_scene == null:
+		return
+	_charge_zone = charge_zone_scene.instantiate()
+	get_tree().current_scene.add_child(_charge_zone)
+	_charge_zone.setup(_charge_start, _charge_dir, charge_distance, charge_width, telegraph_time)
+
 
 ## Le joueur se prend la charge ? On cherche sa HurtBox de torse, pas sa
 ## capsule : c'est le buste visible qui encaisse.
@@ -353,12 +384,16 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 		_die(direction)
 		return
 
-	# Une charge interrompue par un coup : c'est la récompense du joueur
+		# Une charge interrompue par un coup : c'est la récompense du joueur
 	attack_box.monitoring = false
 	AttackToken.release(self)
 	mesh.scale = _base_scale
 	mesh.rotation.z = 0.0
 	mesh.position.y = _stun_base_y
+
+	if _charge_zone != null and is_instance_valid(_charge_zone):
+		_charge_zone.queue_free()
+		_charge_zone = null
 
 	_knockback = direction * knockback_force
 	_set_state(State.HURT)
@@ -408,10 +443,36 @@ func _die(direction: Vector3) -> void:
 	await d.finished
 	queue_free()
 
+## Rempli par le joueur à chaque coup reçu (1 par défaut) ; une fois le
+## quota atteint, déclenche l'étourdissement tout seul. Le compteur se
+## remet à zéro à chaque coup — c'est ce qui redonne du temps avant que
+## la jauge ne commence réellement à redescendre.
+func add_stun(amount: float = 1.0) -> void:
+	if state == State.DEAD or state == State.STUNNED:
+		return
+	_stun_bar = clampf(_stun_bar + amount, 0.0, float(stun_hits_required))
+	_stun_idle_t = 0.0
+	if stun_bar != null:
+		stun_bar.set_ratio(_stun_bar / float(stun_hits_required))
+	if _stun_bar >= float(stun_hits_required) - 0.15:
+		stun(stun_duration)
+
+
+## Ce que la commande réaction du joueur déclenche une fois cet ennemi
+## étourdi : "spin" pour la toupie, "finisher" pour le coup lourd ciblé.
+func get_reaction() -> String:
+	return reaction
+
+
 ## Appelé par le joueur. Un ennemi étourdi est immobile et ouvert à la toupie.
 func stun(duration: float) -> void:
 	if state == State.DEAD:
 		return
+
+	_stun_bar = 0.0
+	_stun_idle_t = 0.0
+	if stun_bar != null:
+		stun_bar.set_ratio(0.0)
 
 	stun_duration = duration
 	attack_box.monitoring = false

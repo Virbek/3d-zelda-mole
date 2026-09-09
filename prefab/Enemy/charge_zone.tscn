@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://bm87evu2f6u1x"]
+
+[ext_resource type="Script" uid="uid://b1bkspopo4tdr" path="res://Script/enemy/charge_zone.gd" id="1_2tmwj"]
+
+[node name="ChargeZone" type="Node3D" unique_id=923834165]
+script = ExtResource("1_2tmwj")

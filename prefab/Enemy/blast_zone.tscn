@@ -4,3 +4,4 @@
 
 [node name="BlastZone" type="Node3D" unique_id=1147567327]
 script = ExtResource("1_d4epy")
+damage = 1

@@ -1,9 +1,36 @@
 [gd_scene format=3 uid="uid://8841mka2gh7s"]
 
 [ext_resource type="Script" uid="uid://b0ndfe22ovd07" path="res://Script/enemy/enemy_shooter.gd" id="1_4okwo"]
-[ext_resource type="PackedScene" path="res://prefab/HealthBar.tscn" id="2_4okwo"]
-[ext_resource type="PackedScene" uid="uid://sbxrnrd4lwl3" path="res://prefab/projectile.tscn" id="2_lwyqm"]
-[ext_resource type="PackedScene" path="res://health_pickup.tscn" id="3_lwyqm"]
+[ext_resource type="Script" uid="uid://co8dub6mnovde" path="res://Script/enemy/projectile.gd" id="2_4okwo"]
+[ext_resource type="PackedScene" uid="uid://siat8vm8to5i" path="res://health_pickup.tscn" id="3_lwyqm"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_n2ty5"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(1, 1, 0.6204995, 1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_osq7l"]
+material = SubResource("StandardMaterial3D_n2ty5")
+radius = 0.18
+height = 0.36
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_osq7l"]
+radius = 0.18
+
+[sub_resource type="PackedScene" id="PackedScene_lwyqm"]
+_bundled = {
+"conn_count": 0,
+"conns": PackedInt32Array(),
+"editable_instances": [],
+"id_paths": [PackedInt32Array(), PackedInt32Array()],
+"names": PackedStringArray("Projectile", "Area3D", "collision_layer", "collision_mask", "monitorable", "script", "speed", "damage", "MeshInstance3D", "MeshInstance3D", "mesh", "CollisionShape3D", "CollisionShape3D", "shape"),
+"node_count": 3,
+"node_ids": PackedInt32Array(611504758, 1097084816, 1644768979),
+"node_paths": [NodePath("."), NodePath(".")],
+"nodes": PackedInt32Array(-1, -1, 1, 0, -1, 6, 2, 0, 3, 1, 4, 2, 5, 3, 6, 4, 7, 5, 0, 1073741824, 0, 9, 8, -1, 1, 10, 6, 0, 1073741825, 0, 12, 11, -1, 1, 13, 7, 0),
+"variants": [0, 4, false, ExtResource("2_4okwo"), 12.0, 2, SubResource("SphereMesh_osq7l"), SubResource("SphereShape3D_osq7l")],
+"version": 3
+}
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_5gf4p"]
 albedo_color = Color(0.30761838, 0.54780513, 0.25590456, 1)
@@ -18,12 +45,13 @@ albedo_color = Color(0.30761838, 0.54780513, 0.25590456, 1)
 
 [node name="EnemyShooter" type="CharacterBody3D" unique_id=810473897]
 script = ExtResource("1_4okwo")
-projectile_scene = ExtResource("2_lwyqm")
+projectile_scene = SubResource("PackedScene_lwyqm")
+max_health = 8
 keep_min = 0.0
 flee_speed = 0.0
 pickup_scene = ExtResource("3_lwyqm")
 
-[node name="HealthBar" parent="." unique_id=661807815 instance=ExtResource("2_4okwo")]
+[node name="HealthBar" parent="." unique_id=661807815]
 transform = Transform3D(1.5, 0, 0, 0, 1.5, 0, 0, 0, 1.5, 0, 1.9371288, 0)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=643444699]

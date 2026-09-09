@@ -16,8 +16,10 @@ albedo_color = Color(0, 0, 1, 1)
 [node name="1Boss" type="CharacterBody3D" unique_id=601346827]
 script = ExtResource("1_gy1u6")
 blast_scene = ExtResource("2_6kxw7")
-damage_per_hit = 2
-rest_time = 2.0
+fall_time = 0.28
+rest_time = 1.5
+blast_damage = 1
+chain_delay = 0.05
 pickup_scene = ExtResource("3_6kxw7")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1421769649]

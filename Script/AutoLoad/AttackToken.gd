@@ -3,7 +3,7 @@ extends Node
 ## Un seul ennemi peut attaquer à la fois. Les autres attendent leur tour.
 ## Sans ça, trois chargeurs simultanés donnent une situation inesquivable.
 
-@export var max_concurrent: int = 1
+@export var max_concurrent: int = 3
 
 var _holders: Array = []
 

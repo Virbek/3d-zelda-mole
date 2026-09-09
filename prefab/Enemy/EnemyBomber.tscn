@@ -19,6 +19,7 @@ albedo_color = Color(1, 0.94337994, 0.4788676, 1)
 script = ExtResource("1_wjp03")
 player_path = null
 blast_scene = ExtResource("2_rd7hb")
+max_health = 6
 damage_per_hit = null
 detect_range = null
 lose_range = null

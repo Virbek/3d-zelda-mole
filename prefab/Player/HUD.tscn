@@ -23,6 +23,7 @@ grow_vertical = 2
 mouse_filter = 2
 
 [node name="HealthBar" type="Control" parent="." unique_id=674020835]
+visible = false
 layout_mode = 3
 anchors_preset = 0
 offset_left = 24.0

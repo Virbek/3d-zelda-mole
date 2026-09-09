@@ -21,7 +21,6 @@ collision_mask = 4
 monitorable = false
 script = ExtResource("1_7q0br")
 speed = 12.0
-damage = 2
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1097084816]
 mesh = SubResource("SphereMesh_osq7l")

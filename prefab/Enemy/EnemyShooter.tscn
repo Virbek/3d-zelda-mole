@@ -1,9 +1,10 @@
 [gd_scene format=3 uid="uid://c732lgsxwdwcw"]
 
 [ext_resource type="Script" uid="uid://b0ndfe22ovd07" path="res://Script/enemy/enemy_shooter.gd" id="1_4okwo"]
-[ext_resource type="PackedScene" uid="uid://otfyx1hk6wag" path="res://prefab/HealthBar.tscn" id="2_4okwo"]
-[ext_resource type="PackedScene" uid="uid://bq27fh8g3khdi" path="res://prefab/projectile.tscn" id="2_lwyqm"]
-[ext_resource type="PackedScene" uid="uid://w28ip5a4qs50" path="res://health_pickup.tscn" id="3_lwyqm"]
+[ext_resource type="PackedScene" uid="uid://otfyx1hk6wag" path="res://prefab/Enemy/HealthBar.tscn" id="2_4okwo"]
+[ext_resource type="PackedScene" uid="uid://bq27fh8g3khdi" path="res://prefab/Enemy/projectile.tscn" id="2_lwyqm"]
+[ext_resource type="PackedScene" uid="uid://w28ip5a4qs50" path="res://prefab/Enemy/health_pickup.tscn" id="3_lwyqm"]
+[ext_resource type="PackedScene" uid="uid://dnbgl5dn6rlbu" path="res://prefab/Enemy/StunBar.tscn" id="5_375ry"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_5gf4p"]
 albedo_color = Color(0.30761838, 0.54780513, 0.25590456, 1)
@@ -19,6 +20,7 @@ albedo_color = Color(0.30761838, 0.54780513, 0.25590456, 1)
 [node name="EnemyShooter" type="CharacterBody3D" unique_id=810473897]
 script = ExtResource("1_4okwo")
 projectile_scene = ExtResource("2_lwyqm")
+max_health = 8
 keep_min = 0.0
 flee_speed = 0.0
 pickup_scene = ExtResource("3_lwyqm")
@@ -43,3 +45,6 @@ collision_mask = 0
 [node name="CollisionShape3D" type="CollisionShape3D" parent="HurtBox" unique_id=840996368]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6963016, 0)
 shape = SubResource("CapsuleShape3D_kef0k")
+
+[node name="StunBar" parent="." unique_id=1713386029 instance=ExtResource("5_375ry")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.8086672, 0)

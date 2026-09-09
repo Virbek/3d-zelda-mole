@@ -3,9 +3,14 @@ extends Node
 ## Logique de combat du joueur.
 ##
 ## Trois outils qui ne se recouvrent pas :
-##   - le combo 3 coups, au contact, avec une chance d'étourdir sur le finisher
+##   - le combo, en boucle 1→2→1→2..., au contact
 ##   - le poing chargé, à distance : le bras part seul, le joueur reste au sol
-##   - la toupie, débloquée uniquement près d'un ennemi étourdi
+##   - la commande réaction, débloquée près d'un ennemi étourdi : toupie ou
+##     coup lourd ciblé (finisher) selon ce que l'ennemi étourdi préfère
+##
+## L'étourdissement n'est plus une chance sur un coup : chaque ennemi a sa
+## propre jauge, remplie par les coups reçus (voir add_stun sur l'ennemi),
+## qui se vide de lui-même si on arrête de le frapper.
 ##
 ## RÉPARTITION DES RÔLES :
 ##   - les pieds portent le déplacement (capsule du Player, au sol)
@@ -24,7 +29,9 @@ extends Node
 @export var fist_box_r_path: NodePath
 
 @export_group("Combo")
-@export var durations: Array[float] = [0.26, 0.24, 0.42]
+## Index 0 et 1 : les deux coups de la boucle. Index 2 : réservé au finisher,
+## déclenché uniquement par la commande réaction sur un ennemi étourdi.
+@export var durations: Array[float] = [0.18, 0.16, 0.42]
 @export var hit_windows: Array[Vector2] = [
 	Vector2(0.25, 0.65),
 	Vector2(0.20, 0.60),
@@ -36,18 +43,12 @@ extends Node
 @export_group("Bond du finisher")
 @export var hop_force: float = 4.5
 @export var hop_forward: float = 3.0
+@export var finisher_damage_multiplier: float = 2.5
 
 @export_group("Rapprochement")
 @export var lunge_range: float = 3.5
-@export var lunge_speed: Array[float] = [12.0, 12.0, 6.0]  ## le coup 3 bondit déjà
+@export var lunge_speed: Array[float] = [12.0, 12.0, 6.0]
 @export var lunge_standoff: float = 1.6  ## en dessous, pas de rapprochement
-
-@export_group("Soin")
-@export var full_combo_heal: int = 1     ## soin quand le coup 3 touche
-
-@export_group("Étourdissement")
-@export var stun_chance: float = 0.35    ## probabilité sur le coup 3
-@export var stun_duration: float = 3.0
 
 @export_group("Attaque chargée")
 @export var charge_delay: float = 0.15       ## maintien avant d'entrer en charge
@@ -89,7 +90,7 @@ var is_spinning: bool = false
 ## le déplacement en même temps que le poing se met en place.
 var charge_ramp: float = 0.0
 
-var _step: int = 0                ## 0 = inactif, 1..3 = coup en cours
+var _step: int = 0                ## 0 = inactif, 1/2 = boucle, 3 = finisher
 var _t: float = 0.0               ## progression normalisée du coup courant
 var _last_step: int = 0
 var _grace: float = 0.0
@@ -99,7 +100,6 @@ var _hit_list: Array = []
 var _press_t: float = -1.0        ## -1 = aucun appui en attente
 var _press_step: int = 1          ## coup que l'appui déclenchera s'il est relâché
 var _charge_t: float = 0.0
-var _healed_this_combo: bool = false
 
 var _punch_t: float = 0.0
 var _punch_power: float = 0.0
@@ -120,14 +120,27 @@ func _ready() -> void:
 	_set_fists(false, false)
 
 
+## Le coup 1 mène au coup 2, le coup 2 reboucle sur le coup 1. Le coup 3
+## (finisher) n'est jamais atteint par cette boucle — il ne se déclenche que
+## via la commande réaction, voir _start_finisher.
+func _next_combo_step(current: int) -> int:
+	return 1 if current >= 2 else current + 1
+
+
 # ---------------------------------------------------------------- ENTRÉES
 
 func _unhandled_input(event: InputEvent) -> void:
-	# --- Toupie : uniquement près d'un ennemi étourdi ---
+	# --- Commande réaction : uniquement près d'un ennemi étourdi ---
 	if event.is_action_pressed("actionEvenement"):
-		if is_spinning or is_charging or is_punching or player.is_dodging:
+		if is_spinning or is_charging or is_punching or player.is_dodging or _step != 0:
 			return
-		if _find_stunned_nearby() != null:
+		var target = _find_stunned_nearby()
+		if target == null:
+			return
+		var reaction: String = target.get_reaction() if target.has_method("get_reaction") else "spin"
+		if reaction == "finisher":
+			_start_finisher(target)
+		else:
 			_start_spin()
 		return
 
@@ -138,12 +151,12 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if _step == 0:
 		# On ne lance rien tout de suite : il faut voir si le joueur maintient
-		if _grace > 0.0 and _last_step < 3:
-			_press_step = _last_step + 1
+		if _grace > 0.0:
+			_press_step = _next_combo_step(_last_step)
 		else:
 			_press_step = 1
 		_press_t = 0.0
-	elif _t >= chain_open and _step < 3:
+	elif _t >= chain_open and _step != 3:
 		_buffered = true   # mémorisé, joué à la fin du coup courant
 
 
@@ -190,14 +203,11 @@ func _physics_process(delta: float) -> void:
 		_step = 0
 		_t = 0.0
 		_grace = chain_grace
-		if _buffered and _last_step < 3:
-			_start(_last_step + 1)
+		if _buffered:
+			_start(_next_combo_step(_last_step))
 
 
 func _start(step: int) -> void:
-	if step == 1:
-		_healed_this_combo = false
-
 	_step = step
 	_last_step = step
 	_t = 0.0
@@ -219,9 +229,24 @@ func _hop() -> void:
 	player.velocity.z += fwd.z * hop_forward
 
 
-## Rapproche le joueur de sa cible au démarrage d'un coup. C'est ce qui évite
-## les allers-retours : le joueur vise approximativement, le jeu comble l'écart.
-## Appelé AVANT _hop, dont l'impulsion s'ajoute par-dessus.
+## Le finisher n'est plus une suite du combo : c'est ce que déclenche la
+## commande réaction sur un ennemi dont c'est la réaction préférée. On
+## réutilise telle quelle la mécanique du coup 3 (animation, bond, fenêtre
+## de coup à l'index 2), juste sur demande plutôt qu'en enchaînement.
+func _start_finisher(target: Node) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+
+	var to_t: Vector3 = target.global_position - player.global_position
+	to_t.y = 0.0
+	if to_t.length() > 0.01:
+		player.rotation.y = atan2(-to_t.x, -to_t.z)
+
+	_start(3)
+
+
+## Rapproche le joueur de sa cible au démarrage d'un coup. Désactivé pour le
+## moment (voir _start) : gardé au cas où on en aurait de nouveau besoin.
 func _lunge(step: int) -> void:
 	var target = rig.get_magnet_target()
 	if target == null:
@@ -260,25 +285,29 @@ func _collect_hits() -> void:
 			var e = area.get_parent()
 			if e == null or not is_instance_valid(e) or e in _hit_list:
 				continue
-			if not e.has_method("take_hit"):
-				continue
+			if e.has_method("add_stun"):
+				e.add_stun()
+			if player.has_method("add_recover_hit"):
+				player.add_recover_hit()
 
 			_hit_list.append(e)
 
 			var dir: Vector3 = e.global_position - player.global_position
 			dir.y = 0.0
 			if dir.length() > 0.01:
-				e.take_hit(dir.normalized())
+				if _step == 3 and "damage_per_hit" in e:
+					var dmg: int = maxi(1, int(round(float(e.damage_per_hit) * finisher_damage_multiplier)))
+					e.take_hit(dir.normalized(), dmg)
+				else:
+					e.take_hit(dir.normalized())
+
+			if e.has_method("add_stun"):
+				e.add_stun()
 
 			_hit_stop()
 
 			var side: float = 1.0 if fist == fist_r else -1.0
 			rig.hit_impact(0.0 if _step == 3 else side)
-
-			# Le finisher peut étourdir : c'est lui qui ouvre la toupie
-			if _step == 3 and e.has_method("stun") and randf() < stun_chance:
-				e.stun(stun_duration)
-
 
 
 # ---------------------------------------------------------------- CHARGE
@@ -384,8 +413,10 @@ func _punch_hits() -> void:
 		var e = area.get_parent()
 		if e == null or not is_instance_valid(e) or e in _hit_list:
 			continue
-		if not e.has_method("take_hit"):
-			continue
+		if e.has_method("add_stun"):
+			e.add_stun()
+		if player.has_method("add_recover_hit"):
+			player.add_recover_hit()
 
 		_hit_list.append(e)
 
@@ -394,6 +425,9 @@ func _punch_hits() -> void:
 		if dir.length() > 0.01:
 			var dmg: int = maxi(1, int(round(lerpf(1.0, float(punch_damage), _punch_power))))
 			e.take_hit(dir.normalized(), dmg)
+
+		if e.has_method("add_stun"):
+			e.add_stun()
 
 		rig.hit_impact(1.0)
 		Sfx.play("hit_heavy", e.global_position)
@@ -488,12 +522,14 @@ func _shake(strength: float) -> void:
 	if cam != null and cam.get_parent().has_method("shake"):
 		cam.get_parent().shake(strength)
 
+
 ## Ce que le clic droit ferait maintenant. Vide = rien de disponible.
 ## Une seule touche pour plusieurs actions : c'est cette chaîne qui dit
 ## au joueur laquelle, plutôt que de le laisser deviner.
 func get_available_action() -> String:
-	if is_spinning or is_charging or is_punching or player.is_dodging:
+	if is_spinning or is_charging or is_punching or player.is_dodging or _step != 0:
 		return ""
-	if _find_stunned_nearby() != null:
-		return "spin"
-	return ""
+	var target = _find_stunned_nearby()
+	if target == null:
+		return ""
+	return target.get_reaction() if target.has_method("get_reaction") else "spin"

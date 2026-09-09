@@ -131,7 +131,10 @@ extends Node3D
 @export var impact_hold: float = 0.10      ## durée du blocage du poing
 @export var impact_recoil: float = 0.12    ## léger recul au contact
 
+@export_group("Ragdoll (mort)")
+@export var ragdoll_gravity: float = 20.0
 @onready var player: CharacterBody3D = get_node(player_path)
+
 @onready var body: Node3D = $Body
 @onready var foot_l: Node3D = $FootL
 @onready var foot_r: Node3D = $FootR
@@ -163,6 +166,9 @@ var _body_pos := Vector3.ZERO
 var _body_vel := Vector3.ZERO
 
 var _was_dodging := false
+
+var _ragdoll: bool = false
+var _ragdoll_vel: Dictionary = {}   ## Node3D → vitesse de chute courante
 
 var _spinning: bool = false
 var _spin_k: float = 0.0
@@ -232,6 +238,10 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if _ragdoll:
+		_update_ragdoll(delta)
+		return
+
 	# La cible est libre entre deux coups (le marqueur peut donc l'afficher en
 	# continu), mais verrouillée pendant une frappe : sinon le poing zigzaguerait
 	# entre deux ennemis en plein mouvement.
@@ -244,6 +254,59 @@ func _physics_process(delta: float) -> void:
 	_update_body(delta)
 	_update_charge_body()
 	_update_hands(delta)
+
+
+## Appelé par Player.gd à la mort. Chaque membre arrête d'être piloté par le
+## rig et tombe en chute libre jusqu'au sol détecté sous lui.
+func ragdoll() -> void:
+	_ragdoll = true
+	_ragdoll_vel.clear()
+	for n in [body, foot_l, foot_r, hand_l, hand_r]:
+		_ragdoll_vel[n] = Vector3.ZERO
+
+
+## Pas de vraie physique de corps rigide : chaque membre tombe seul, sans
+## interagir avec les autres, jusqu'au sol qu'un rayon détecte sous lui —
+## suffisant pour que le personnage s'effondre plutôt que de rester figé
+## debout, sans avoir à transformer les membres en RigidBody3D.
+func _update_ragdoll(delta: float) -> void:
+	for n in [body, foot_l, foot_r, hand_l, hand_r]:
+		var vel: Vector3 = _ragdoll_vel.get(n, Vector3.ZERO)
+		var ground_y: float = _ground_below(n.global_position)
+
+		if n.global_position.y > ground_y + 0.02:
+			vel.y -= ragdoll_gravity * delta
+			var pos: Vector3 = n.global_position
+			pos.y += vel.y * delta
+			if pos.y < ground_y:
+				pos.y = ground_y
+				vel.y = 0.0
+			n.global_position = pos
+		else:
+			var pos: Vector3 = n.global_position
+			pos.y = ground_y
+			n.global_position = pos
+			vel = Vector3.ZERO
+
+		_ragdoll_vel[n] = vel
+
+
+## Réutilise le même calque que le clip du rig (le décor) : sol, plateforme,
+## rampe comptent tous, un membre qui meurt sur la plateforme s'arrête donc
+## dessus plutôt que de traverser jusqu'au sol du dessous.
+func _ground_below(pos: Vector3) -> float:
+	var space := get_world_3d().direct_space_state
+	var from: Vector3 = pos + Vector3.UP * 2.0
+	var to: Vector3 = pos + Vector3.DOWN * 10.0
+
+	var q := PhysicsRayQueryParameters3D.create(from, to)
+	q.exclude = [player.get_rid()]
+	q.collision_mask = clip_mask
+
+	var hit := space.intersect_ray(q)
+	if hit.is_empty():
+		return pos.y - 10.0   # rien détecté : il continue de tomber plutôt que de rester bloqué en l'air
+	return hit.position.y
 
 
 # ---------------------------------------------------------------- MAGNÉTISME

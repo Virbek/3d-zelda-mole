@@ -10,7 +10,6 @@ extends CharacterBody3D
 
 
 
-
 @export_group("Esquive")
 @export var iframe_start: float = 0.05    ## délai avant que l'invincibilité s'active
 @export var iframe_duration: float = 0.25 ## durée de l'invincibilité
@@ -26,11 +25,18 @@ extends CharacterBody3D
 @export var hurt_knockback: float = 7.0
 @export var blink_interval: float = 0.08
 
+@export_group("Récupération")
+@export var recover_hits_required: int = 6      ## coups à porter pour regagner 1 pv
+@export var recover_drain_delay: float = 0.6    ## répit avant que la progression commence à redescendre
+@export var recover_drain_rate: float = 0.8     ## coups perdus par seconde, une fois la latence passée
+
 signal health_changed(current: int, maximum: int)
+signal recover_changed(progress: float, required: int)
 signal died
 
 var is_sprinting: bool = false
 @onready var rig: Node3D = $Rig
+
 
 const CAM_YAW := deg_to_rad(45.0)
 
@@ -41,19 +47,31 @@ var _dodge_dir := Vector3.ZERO
 var _dodge_cd: float = 0.0
 var _iframe_t: float = 0.0
 
-
 var health: int
 var _hurt_t: float = 0.0
 var _blink_t: float = 0.0
 var _dead := false
 
+var _recover_progress: float = 0.0
+var _recover_idle_t: float = 0.0
+
 func _ready() -> void:
+	add_to_group("player")
+	if Checkpoints.has_checkpoint:
+		global_position = Checkpoints.position
 	health = max_health
 	health_changed.emit(health, max_health)
 
 func _physics_process(delta: float) -> void:
 	if _dead:
 		return
+
+	# --- Récupération de vie : redescend si on arrête de taper ---
+	if health < max_health and _recover_progress > 0.0:
+		_recover_idle_t += delta
+		if _recover_idle_t >= recover_drain_delay:
+			_recover_progress = maxf(_recover_progress - recover_drain_rate * delta, 0.0)
+			recover_changed.emit(_recover_progress, recover_hits_required)
 
 	# --- Invincibilité et clignotement après un coup reçu ---
 	if _hurt_t > 0.0:
@@ -162,6 +180,12 @@ func take_damage(amount: int, direction: Vector3) -> void:
 	health = maxi(health - amount, 0)
 	health_changed.emit(health, max_health)
 
+	# Un coup encaissé annule la récupération en cours : le prochain
+	# emplacement à regagner repart de zéro.
+	_recover_progress = 0.0
+	_recover_idle_t = 0.0
+	recover_changed.emit(0.0, recover_hits_required)
+
 	_hurt_t = hurt_iframes
 	velocity.x += direction.x * hurt_knockback
 	velocity.z += direction.z * hurt_knockback
@@ -180,7 +204,29 @@ func heal(amount: int) -> void:
 		return
 	health = mini(health + amount, max_health)
 	health_changed.emit(health, max_health)
+
+	_recover_progress = 0.0
+	_recover_idle_t = 0.0
+	recover_changed.emit(0.0, recover_hits_required)
 	
+## Rempli par un coup porté sur un ennemi (voir combat.gd). Une fois le
+## quota atteint, regagne 1 pv automatiquement — même logique que la jauge
+## d'étourdissement des ennemis, côté joueur cette fois.
+func add_recover_hit(amount: float = 1.0) -> void:
+	if _dead or health >= max_health:
+		return
+
+	_recover_progress = clampf(_recover_progress + amount, 0.0, float(recover_hits_required))
+	_recover_idle_t = 0.0
+	recover_changed.emit(_recover_progress, recover_hits_required)
+
+	if _recover_progress >= float(recover_hits_required):
+		_recover_progress = 0.0
+		health = mini(health + 1, max_health)
+		health_changed.emit(health, max_health)
+		recover_changed.emit(0.0, recover_hits_required)
+
+
 func _die() -> void:
 	_dead = true
 	died.emit()
@@ -191,5 +237,22 @@ func _die() -> void:
 	if cam != null and cam.get_parent().has_method("shake"):
 		cam.get_parent().shake(0.9)
 
-	await get_tree().create_timer(1.2).timeout
-	get_tree().reload_current_scene()
+	rig.ragdoll()
+
+	await get_tree().create_timer(1.0).timeout
+	Checkpoints.respawn()
+
+
+## Réapparition au dernier checkpoint : vie pleine, arène associée remise à
+## zéro par Checkpoints.respawn(). Petite fenêtre d'invulnérabilité pour ne
+## pas se refaire toucher instantanément par un ennemi qui traînerait déjà
+## près du point de passage.
+func _respawn() -> void:
+	Checkpoints.respawn()
+
+	health = max_health
+	health_changed.emit(health, max_health)
+	velocity = Vector3.ZERO
+	_dead = false
+	_hurt_t = hurt_iframes
+	set_physics_process(true)

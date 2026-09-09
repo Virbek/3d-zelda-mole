@@ -16,6 +16,7 @@
 [ext_resource type="PackedScene" uid="uid://c732lgsxwdwcw" path="res://prefab/Enemy/EnemyShooter.tscn" id="10_b7scd"]
 [ext_resource type="PackedScene" uid="uid://uadbmatn651" path="res://prefab/Enemy/EnemyBomber.tscn" id="12_bdiev"]
 [ext_resource type="PackedScene" uid="uid://cgvh4bybr63w8" path="res://prefab/Enemy/Boss/1Boss.tscn" id="13_pnog0"]
+[ext_resource type="Script" uid="uid://dqfhxof5upnh8" path="res://game_over.gd" id="17_gndi7"]
 [ext_resource type="Script" uid="uid://c00ikrals38ol" path="res://checkpoint.gd" id="18_1fd8v"]
 
 [sub_resource type="Environment" id="Environment_osq7l"]
@@ -49,6 +50,10 @@ radius = 0.4
 
 [node name="Hud" parent="." unique_id=1187038388 instance=ExtResource("1_7hjm2")]
 player_path = NodePath("../Player")
+
+[node name="game_over" type="CanvasLayer" parent="Hud" unique_id=862178347]
+script = ExtResource("17_gndi7")
+player_path = NodePath("../../Player")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1335146338]
 transform = Transform3D(0.81915206, 0.43938503, -0.36868784, 0, 0.64278764, 0.76604444, 0.57357645, -0.62750685, 0.5265408, 0, 28.800007, 0)
@@ -221,7 +226,6 @@ wall_color = null
 pillar_color = null
 
 [node name="checkpoint" type="Area3D" parent="." unique_id=411337181]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 59.103054, 0, 0)
 collision_layer = 0
 collision_mask = 4
 script = ExtResource("18_1fd8v")

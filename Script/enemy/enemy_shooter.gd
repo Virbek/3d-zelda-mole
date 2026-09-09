@@ -60,6 +60,10 @@ signal died
 @export var stun_duration: float = 3.0
 @export var stun_color := Color(0.25, 1.0, 0.35)
 @export var stun_wobble: float = 0.12   ## amplitude du vacillement
+@export var stun_hits_required: int = 6     ## nombre de coups pour étourdir
+@export var stun_drain_delay: float = 0.6   ## temps sans coup avant que la jauge commence à redescendre
+@export var stun_drain_rate: float = 0.8    ## coups perdus par seconde, une fois la latence passée
+@export var reaction: String = "finisher"   ## ce que déclenche la commande réaction une fois étourdi
 
 @export_group("Butin")
 @export var pickup_scene: PackedScene
@@ -70,6 +74,7 @@ var player: CharacterBody3D = null
 @onready var mesh: MeshInstance3D = $MeshInstance3D
 @onready var health_bar: Node3D = $HealthBar
 @onready var hurt_box: Area3D = $HurtBox
+@onready var stun_bar: Node3D = get_node_or_null("StunBar")
 
 var state: State = State.IDLE
 var health: int
@@ -78,6 +83,8 @@ var _t: float = 0.0
 var _cooldown: float = 0.0
 var _knockback := Vector3.ZERO
 var _strafe_dir: float = 1.0
+var _stun_bar: float = 0.0
+var _stun_idle_t: float = 0.0
 var _player_hurt: Area3D = null
 
 var _mat: StandardMaterial3D
@@ -118,6 +125,12 @@ func _physics_process(delta: float) -> void:
 	if _cooldown > 0.0:
 		_cooldown = maxf(_cooldown - delta, 0.0)
 
+	if state != State.STUNNED and state != State.DEAD and _stun_bar > 0.0:
+		_stun_idle_t += delta
+		if _stun_idle_t >= stun_drain_delay:
+			_stun_bar = maxf(_stun_bar - stun_drain_rate * delta, 0.0)
+			if stun_bar != null:
+				stun_bar.set_ratio(_stun_bar / float(stun_hits_required))
 	match state:
 		State.IDLE:
 			_idle(delta)
@@ -132,7 +145,7 @@ func _physics_process(delta: float) -> void:
 		State.HURT:
 			_hurt(delta)
 		State.STUNNED:
-			_stunned(delta)
+			_stunned()
 		State.DEAD:
 			return
 
@@ -353,10 +366,32 @@ func _die(direction: Vector3) -> void:
 	await d.finished
 	queue_free()
 
+func add_stun(amount: float = 1.0) -> void:
+	if state == State.DEAD or state == State.STUNNED:
+		return
+	_stun_bar = clampf(_stun_bar + amount, 0.0, float(stun_hits_required))
+	_stun_idle_t = 0.0
+	if stun_bar != null:
+		stun_bar.set_ratio(_stun_bar / float(stun_hits_required))
+	if _stun_bar >= float(stun_hits_required) - 0.15:
+		stun(stun_duration)
+
+
+## Ce que la commande réaction du joueur déclenche une fois cet ennemi
+## étourdi : "spin" pour la toupie, "finisher" pour le coup lourd ciblé.
+func get_reaction() -> String:
+	return reaction
+
+
 ## Appelé par le joueur. Un ennemi étourdi est immobile et ouvert à la toupie.
 func stun(duration: float) -> void:
 	if state == State.DEAD:
 		return
+
+	_stun_bar = 0.0
+	_stun_idle_t = 0.0
+	if stun_bar != null:
+		stun_bar.set_ratio(0.0)
 
 	mesh.scale = _base_scale     # annule l'étirement de visée en cours
 	velocity = Vector3.ZERO
@@ -374,7 +409,7 @@ func stun(duration: float) -> void:
 func is_stunned() -> bool:
 	return state == State.STUNNED
 
-func _stunned(delta: float) -> void:
+func _stunned() -> void:
 	velocity.x = 0.0
 	velocity.z = 0.0
 
@@ -389,6 +424,7 @@ func _stunned(delta: float) -> void:
 		mesh.position.y = _stun_base_y
 		mesh.rotation.z = 0.0
 		_mat.albedo_color = _base_color
+		_set_state(State.REPOSITION)
 
 	
 ## Le butin est lâché avant le tween de mort : sinon l'await retarde

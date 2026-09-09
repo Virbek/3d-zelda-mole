@@ -1,8 +1,10 @@
 [gd_scene format=3 uid="uid://b34mk8qpxnm3e"]
 
 [ext_resource type="Script" uid="uid://c3ttsl24yvlx1" path="res://Script/enemy/enemy.gd" id="1_tt7e2"]
-[ext_resource type="PackedScene" uid="uid://otfyx1hk6wag" path="res://prefab/HealthBar.tscn" id="2_e3gy8"]
-[ext_resource type="PackedScene" uid="uid://w28ip5a4qs50" path="res://health_pickup.tscn" id="2_mx2wg"]
+[ext_resource type="PackedScene" uid="uid://otfyx1hk6wag" path="res://prefab/Enemy/HealthBar.tscn" id="2_e3gy8"]
+[ext_resource type="PackedScene" uid="uid://w28ip5a4qs50" path="res://prefab/Enemy/health_pickup.tscn" id="2_mx2wg"]
+[ext_resource type="PackedScene" uid="uid://bm87evu2f6u1x" path="res://prefab/Enemy/charge_zone.tscn" id="2_vxyhu"]
+[ext_resource type="PackedScene" uid="uid://dnbgl5dn6rlbu" path="res://prefab/Enemy/StunBar.tscn" id="3_vwq1w"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_5gf4p"]
 albedo_color = Color(0.47866166, 0.47866172, 0.47866166, 1)
@@ -20,9 +22,14 @@ radius = 0.6
 
 [node name="Enemy" type="CharacterBody3D" unique_id=810473897]
 script = ExtResource("1_tt7e2")
+max_health = 10
+charge_zone_scene = ExtResource("2_vxyhu")
 pickup_scene = ExtResource("2_mx2wg")
 
-[node name="HealthBar" parent="." unique_id=661807815 instance=ExtResource("2_e3gy8")]
+[node name="StunBar" parent="." unique_id=661807815 instance=ExtResource("3_vwq1w")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.8032436, 0)
+
+[node name="HealthBar" parent="." unique_id=41266063 instance=ExtResource("2_e3gy8")]
 transform = Transform3D(1.5, 0, 0, 0, 1.5, 0, 0, 0, 1.5, 0, 1.9371288, 0)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=643444699]
