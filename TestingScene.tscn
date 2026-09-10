@@ -17,6 +17,7 @@
 [ext_resource type="PackedScene" uid="uid://uadbmatn651" path="res://prefab/Enemy/EnemyBomber.tscn" id="12_bdiev"]
 [ext_resource type="PackedScene" uid="uid://cgvh4bybr63w8" path="res://prefab/Enemy/Boss/1Boss.tscn" id="13_pnog0"]
 [ext_resource type="Script" uid="uid://c00ikrals38ol" path="res://checkpoint.gd" id="18_1fd8v"]
+[ext_resource type="PackedScene" uid="uid://bh07vh14y6ii" path="res://first_room.tscn" id="18_63wju"]
 
 [sub_resource type="Environment" id="Environment_osq7l"]
 
@@ -70,7 +71,7 @@ projection = 1
 size = 12.0
 
 [node name="Player" type="CharacterBody3D" parent="." unique_id=66199162]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+transform = Transform3D(0.99967134, -0.025635373, 0, 0.025635373, 0.99967134, 0, 0, 0, 1, 0, 1, 0)
 floor_snap_length = 0.3
 script = ExtResource("2_6mnxl")
 speed = null
@@ -228,3 +229,5 @@ script = ExtResource("18_1fd8v")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="checkpoint" unique_id=51966389]
 shape = SubResource("SphereShape3D_osq7l")
+
+[node name="FirstRoom" parent="." unique_id=602238273 instance=ExtResource("18_63wju")]

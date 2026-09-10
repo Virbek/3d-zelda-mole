@@ -35,7 +35,11 @@ signal died
 @export_group("Charge")
 @export var telegraph_time: float = 0.75   ## temps d'arrêt avant de foncer
 @export var charge_speed: float = 13.0
-@export var charge_distance: float = 6.0
+## Doit dépasser charge_range d'une bonne marge : sinon reculer tout droit
+## pendant le télégraphe suffit à sortir du couloir avant que la charge ne
+## parte. La marge doit couvrir la distance qu'un joueur peut parcourir en
+## reculant pendant telegraph_time.
+@export var charge_distance: float = 10.0
 @export var charge_max_time: float = 1.2   ## sécurité anti-blocage
 @export var recover_time: float = 0.9      ## fenêtre de punition pour le joueur
 @export var charge_damage: int = 1
@@ -96,6 +100,7 @@ var _t: float = 0.0                  ## temps passé dans l'état courant
 var _cooldown: float = 0.0
 var _charge_dir := Vector3.ZERO
 var _charge_start := Vector3.ZERO
+var _charge_reach: float = 0.0   ## charge_distance, éventuellement raccourcie par un mur détecté au télégraphe
 var _knockback := Vector3.ZERO
 var _hit_player := false             ## un seul dégât par charge
 var _charge_zone: Node3D = null       ## un seul dégât par charge
@@ -194,7 +199,14 @@ func _chase(delta: float) -> void:
 	else:
 		_lose_t = 0.0
 
+		
 	if d < charge_range and _cooldown <= 0.0:
+		if not _has_clear_line_to_player():
+			# Un pilier ou un autre ennemi coupe le couloir : charger
+			# maintenant raterait à coup sûr. On se replace en attendant une
+			# meilleure ouverture plutôt que de partir dans le vide.
+			_circle(delta, d)
+			return
 		if AttackToken.request(self):
 			_set_state(State.TELEGRAPH)
 			_start_telegraph()
@@ -252,7 +264,8 @@ func _charge(_delta: float) -> void:
 	velocity.x = _charge_dir.x * charge_speed
 	velocity.z = _charge_dir.z * charge_speed
 
-	_check_charge_hit()
+	if _check_charge_hit():
+		return   # le recul vient d'être appliqué, ne pas l'écraser ci-dessous
 
 	var travelled: float = Vector2(
 		global_position.x - _charge_start.x,
@@ -261,7 +274,7 @@ func _charge(_delta: float) -> void:
 
 	var blocked: bool = get_slide_collision_count() > 0 and _t > 0.05
 
-	if travelled >= charge_distance or blocked or _t >= charge_max_time:
+	if travelled >= _charge_reach or blocked or _t >= charge_max_time:
 		# Arrêt net dans tous les cas — sans ça, la vitesse de charge reste
 		# active une frame de trop et le chargeur dépasse la zone affichée.
 		velocity.x = 0.0
@@ -336,7 +349,28 @@ func _start_telegraph() -> void:
 	# couloir affiché au sol doit être la vérité dès la première frame.
 	_charge_dir = _dir_to_player()
 	_charge_start = global_position
+	_charge_reach = _measure_charge_reach(_charge_start, _charge_dir)
 	_spawn_charge_zone()
+
+
+## charge_distance est un maximum, pas une garantie : un mur plus proche doit
+## couper la charge avant. On le mesure dès le télégraphe pour que la zone
+## affichée au sol et l'arrêt réel de la charge pointent toujours au même
+## endroit — jamais la zone n'annonce une portée que le chargeur n'atteindra
+## pas.
+func _measure_charge_reach(from: Vector3, dir: Vector3) -> float:
+	var space := get_world_3d().direct_space_state
+	var to: Vector3 = from + dir * charge_distance
+	var q := PhysicsRayQueryParameters3D.create(from, to)
+	# Le joueur ne doit jamais agir comme un mur ici : la charge le traverse,
+	# seul un vrai obstacle (mur, pilier) doit couper la mesure.
+	q.exclude = [get_rid(), player.get_rid()]
+	q.collision_mask = 1   # calque du décor
+
+	var hit := space.intersect_ray(q)
+	if hit.is_empty():
+		return charge_distance
+	return from.distance_to(hit.position)
 
 
 func _spawn_charge_zone() -> void:
@@ -344,16 +378,20 @@ func _spawn_charge_zone() -> void:
 		return
 	_charge_zone = charge_zone_scene.instantiate()
 	get_tree().current_scene.add_child(_charge_zone)
-	_charge_zone.setup(_charge_start, _charge_dir, charge_distance, charge_width, telegraph_time)
+	_charge_zone.setup(_charge_start, _charge_dir, _charge_reach, charge_width, telegraph_time)
 
 
 ## Le joueur se prend la charge ? On cherche sa HurtBox de torse, pas sa
 ## capsule : c'est le buste visible qui encaisse.
 ## _hit_player garantit un seul dégât par charge, sans quoi un ennemi qui
 ## traverse le joueur lui inflige des dégâts à chaque frame de contact.
-func _check_charge_hit() -> void:
+## Le joueur se prend la charge ? On cherche sa HurtBox de torse, pas sa
+## capsule : c'est le buste visible qui encaisse.
+## Renvoie true si le contact a eu lieu — la charge s'arrête alors net,
+## avec un recul, plutôt que de continuer à pousser dans le joueur.
+func _check_charge_hit() -> bool:
 	if _hit_player:
-		return
+		return false
 
 	for area in attack_box.get_overlapping_areas():
 		if not area.is_in_group("player_hurt"):
@@ -366,7 +404,38 @@ func _check_charge_hit() -> void:
 		if dir.length() > 0.01:
 			area.take_damage(charge_damage, dir.normalized())
 		_hit_player = true
-		return
+		_end_charge_with_recoil()
+		return true
+
+	return false
+
+
+## Contact avec le joueur : arrêt net et recul, comme un choc contre un mur.
+## Sans ça, le chargeur continue de pousser dans le joueur et peut rester
+## plaqué contre lui plutôt que de repartir vulnérable en RECOVER.
+func _end_charge_with_recoil() -> void:
+	velocity.x = -_charge_dir.x * charge_speed * 0.5
+	velocity.z = -_charge_dir.z * charge_speed * 0.5
+	attack_box.monitoring = false
+	AttackToken.release(self)
+	_cooldown = charge_cooldown
+	_set_state(State.RECOVER)
+
+
+## Un couloir obstrué (pilier, autre ennemi) ferait rater le coup à coup
+## sûr — mieux vaut se replacer que de charger dans le vide. Le joueur
+## lui-même est exclu : il est la destination du rayon, pas un obstacle.
+func _has_clear_line_to_player() -> bool:
+	var from: Vector3 = global_position
+	var to: Vector3 = player.global_position
+	to.y = from.y
+
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(from, to)
+	q.exclude = [get_rid(), player.get_rid()]
+	q.collision_mask = 1   # calque du décor (et des autres ennemis, tant que tu n'as pas séparé les calques)
+
+	return space.intersect_ray(q).is_empty()
 
 
 # ---------------------------------------------------------------- DÉGÂTS
