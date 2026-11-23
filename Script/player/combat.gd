@@ -130,6 +130,10 @@ func _next_combo_step(current: int) -> int:
 # ---------------------------------------------------------------- ENTRÉES
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Passage de porte en cours : pas d'attaque
+	if not player.controls_enabled:
+		return
+
 	# --- Commande réaction : uniquement près d'un ennemi étourdi ---
 	if event.is_action_pressed("actionEvenement"):
 		if is_spinning or is_charging or is_punching or player.is_dodging or _step != 0:

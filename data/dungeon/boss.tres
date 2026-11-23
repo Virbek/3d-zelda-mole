@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="RoomData" format=3]
+
+[ext_resource type="Script" path="res://Script/dungeon/room_data.gd" id="1_postu"]
+
+[resource]
+script = ExtResource("1_postu")
+waves = PackedStringArray("..........\n..........\n....B.....\n..........\n..........\n..........\n..........\n..........")
+lock_in = true

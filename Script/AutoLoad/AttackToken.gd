@@ -19,6 +19,13 @@ func request(who: Node) -> bool:
 	return true
 
 
+## Dit si request() réussirait, sans prendre le jeton. Permet à un ennemi
+## d'approcher sans monopoliser une place tant qu'il n'est pas au contact.
+func is_available(who: Node) -> bool:
+	_cleanup()
+	return who in _holders or _holders.size() < max_concurrent
+
+
 func release(who: Node) -> void:
 	_holders.erase(who)
 

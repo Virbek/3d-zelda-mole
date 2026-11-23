@@ -48,11 +48,6 @@ signal died
 @export var pulse_base: float = 2.5      ## pulsation au repos, en Hz
 @export var pulse_near: float = 11.0     ## pulsation quand il est proche
 
-@export_group("Butin")
-@export var pickup_scene: PackedScene
-@export var pickup_chance: float = 0.35
-@export var pickup_max: int = 1
-
 var state: State = State.IDLE
 var health: int
 var player: CharacterBody3D = null
@@ -242,7 +237,6 @@ func is_stunned() -> bool:
 ## Mort par les coups du joueur : il explose quand même. C'est tout l'intérêt
 ## de l'ennemi — le tuer ne suffit pas, il faut le tuer AU BON ENDROIT.
 func _die(direction: Vector3) -> void:
-	_drop_pickups()
 	_explode()
 
 
@@ -282,14 +276,3 @@ func _ground_y() -> float:
 	q.exclude = [get_rid()]
 	var hit := space.intersect_ray(q)
 	return hit.position.y + 0.02 if not hit.is_empty() else global_position.y
-
-
-func _drop_pickups() -> void:
-	if pickup_scene == null or randf() > pickup_chance:
-		return
-
-	var n: int = 1 + (randi() % maxi(pickup_max, 1))
-	for i in n:
-		var p: Node3D = pickup_scene.instantiate()
-		get_tree().current_scene.add_child(p)
-		p.global_position = global_position + Vector3.UP * 0.6

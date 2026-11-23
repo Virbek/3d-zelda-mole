@@ -1,0 +1,54 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://Script/enemy/enemy_melee.gd" id="1_u52hn"]
+[ext_resource type="PackedScene" path="res://prefab/Enemy/health_pickup.tscn" id="2_evny1"]
+[ext_resource type="PackedScene" path="res://prefab/Enemy/StunBar.tscn" id="3_tvmbj"]
+[ext_resource type="PackedScene" path="res://prefab/Enemy/HealthBar.tscn" id="4_tunvo"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_7mmjg"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_l2an1"]
+albedo_color = Color(0.55, 0.28, 0.22, 1)
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_s33aa"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_p0qqr"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_yohcp"]
+size = Vector3(1.6, 1.4, 1.3)
+
+[node name="EnemyMelee" type="CharacterBody3D" unique_id=30367844]
+script = ExtResource("1_u52hn")
+pickup_scene = ExtResource("2_evny1")
+
+[node name="StunBar" parent="." unique_id=661807815 instance=ExtResource("3_tvmbj")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.8032436, 0)
+
+[node name="HealthBar" parent="." unique_id=1256226678 instance=ExtResource("4_tunvo")]
+transform = Transform3D(1.5, 0, 0, 0, 1.5, 0, 0, 0, 1.5, 0, 1.9371288, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1935378780]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)
+mesh = SubResource("CapsuleMesh_7mmjg")
+surface_material_override/0 = SubResource("StandardMaterial3D_l2an1")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=2036793075]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)
+shape = SubResource("CapsuleShape3D_s33aa")
+
+[node name="HurtBox" type="Area3D" parent="." unique_id=1668863941]
+collision_layer = 2
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="HurtBox" unique_id=404249871]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6468748, 0)
+shape = SubResource("CapsuleShape3D_p0qqr")
+
+[node name="AttackBox" type="Area3D" parent="." unique_id=856748701]
+collision_layer = 0
+collision_mask = 4
+monitoring = false
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="AttackBox" unique_id=524501627]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.8, -0.9)
+shape = SubResource("BoxShape3D_yohcp")

@@ -56,10 +56,6 @@ signal phase_changed(phase: int)
 @export var flash_count: int = 3
 @export var flash_duration: float = 0.4
 
-@export_group("Butin")
-@export var pickup_scene: PackedScene
-@export var pickup_count: int = 5         ## il en lâche toujours, il est unique
-
 @export_group("Mort")
 @export var death_time: float = 1.2
 
@@ -78,6 +74,7 @@ var _start_pos := Vector3.ZERO
 var _land_pos := Vector3.ZERO
 var _landed_resolved: bool = false
 var _ground_y: float = 0.0
+var _ground_resolved: bool = false
 var _mesh_rest_y: float = 0.0
 var _mesh_local_bottom: float = 0.0
 
@@ -102,6 +99,8 @@ func _ready() -> void:
 	_mesh_rest_y = mesh.position.y
 	if mesh.mesh != null:
 		_mesh_local_bottom = mesh.mesh.get_aabb().position.y
+	# _ground_y n'est PAS lu ici : l'arène fait add_child() avant de placer le
+	# boss, donc sa position n'est pas encore la bonne. Voir _resolve_ground.
 	_ground_y = global_position.y
 
 	var base := mesh.get_active_material(0)
@@ -114,6 +113,9 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if not _ground_resolved:
+		_ground_resolved = true
+		_resolve_ground()
 	_t += delta
 	if state != State.AIRBORNE and global_position.y < _ground_y:
 		global_position.y = _ground_y
@@ -292,6 +294,44 @@ func _face_player() -> void:
 	if v.length() > 0.01:
 		rotation.y = lerp_angle(rotation.y, atan2(-v.x, -v.z), 0.15)
 
+## Le pivot du boss est au CENTRE de sa capsule, pas à ses pieds. Prendre
+## la position d'apparition comme « sol » l'enterrait donc à moitié à chaque
+## atterrissage. On mesure le vrai sol sous lui et on y ajoute la distance
+## pivot → bas de la capsule de collision.
+func _resolve_ground() -> void:
+	var feet: float = _feet_offset()
+	var space := get_world_3d().direct_space_state
+	var from: Vector3 = global_position + Vector3.UP * (feet + 0.5)
+	var q := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 20.0)
+	q.exclude = [get_rid()]
+	if player != null:
+		q.exclude.append(player.get_rid())
+	q.collision_mask = 1   # calque du décor
+	var hit := space.intersect_ray(q)
+
+	if hit.is_empty():
+		_ground_y = global_position.y
+		return
+	_ground_y = hit.position.y + feet
+	if state != State.AIRBORNE:
+		global_position.y = _ground_y
+
+
+## Distance entre le pivot du boss et le bas de sa capsule de collision.
+func _feet_offset() -> float:
+	var col := get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if col == null or col.shape == null:
+		return 0.0
+	var half: float = 0.0
+	if col.shape is CapsuleShape3D:
+		half = (col.shape as CapsuleShape3D).height * 0.5
+	elif col.shape is SphereShape3D:
+		half = (col.shape as SphereShape3D).radius
+	elif col.shape is BoxShape3D:
+		half = (col.shape as BoxShape3D).size.y * 0.5
+	return half * col.scale.y - col.position.y
+
+
 ## Le squash s'applique autour du pivot du mesh. Si ce pivot n'est pas à la
 ## base du modèle, rétrécir mesh.scale.y donne l'impression que le boss
 ## s'enfonce dans le sol. On compense en ancrant la base visuelle au niveau
@@ -373,7 +413,6 @@ func _die() -> void:
 	hurt_box.monitorable = false
 	set_collision_layer_value(1, false)
 
-	_drop_pickups()
 
 	if _flash_tween != null and _flash_tween.is_running():
 		_flash_tween.kill()
@@ -391,13 +430,3 @@ func _die() -> void:
 	_shake(1.2)
 	await d.finished
 	queue_free()
-
-
-func _drop_pickups() -> void:
-	if pickup_scene == null:
-		return
-
-	for i in pickup_count:
-		var p: Node3D = pickup_scene.instantiate()
-		get_tree().current_scene.add_child(p)
-		p.global_position = global_position + Vector3.UP * 0.8

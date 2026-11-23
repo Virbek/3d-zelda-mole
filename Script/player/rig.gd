@@ -324,7 +324,7 @@ func _player_intent() -> Vector3:
 		Input.get_axis("move_left", "move_right"),
 		0.0,
 		Input.get_axis("move_forward", "move_back")
-	).rotated(Vector3.UP, deg_to_rad(45.0))
+	).rotated(Vector3.UP, player.camera_yaw() if player.has_method("camera_yaw") else deg_to_rad(45.0))
 
 	if v.length() > 0.15:
 		return v.normalized()

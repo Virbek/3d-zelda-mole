@@ -65,11 +65,6 @@ signal died
 @export var stun_drain_rate: float = 0.8    ## coups perdus par seconde, une fois la latence passée
 @export var reaction: String = "finisher"   ## ce que déclenche la commande réaction une fois étourdi
 
-@export_group("Butin")
-@export var pickup_scene: PackedScene
-@export var pickup_chance: float = 0.45   ## probabilité d'en lâcher un
-@export var pickup_max: int = 2           ## combien au maximum
-
 var player: CharacterBody3D = null
 @onready var mesh: MeshInstance3D = $MeshInstance3D
 @onready var health_bar: Node3D = $HealthBar
@@ -85,6 +80,7 @@ var _knockback := Vector3.ZERO
 var _strafe_dir: float = 1.0
 var _stun_bar: float = 0.0
 var _stun_idle_t: float = 0.0
+var _stun_frame: int = -1             ## frame physique où l'étourdissement a commencé
 var _player_hurt: Area3D = null
 
 var _mat: StandardMaterial3D
@@ -318,6 +314,13 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 	if health <= 0:
 		_die(direction)
 		return
+
+	# Le joueur appelle add_stun AVANT take_hit : le coup qui vient de remplir
+	# la jauge ne doit pas annuler l'étourdissement qu'il a lui-même déclenché.
+	# Tout coup suivant, lui, réveille l'ennemi (il passe en HURT ci-dessous).
+	if state == State.STUNNED and Engine.get_physics_frames() == _stun_frame:
+		return
+
 	mesh.scale = _base_scale
 	mesh.rotation.z = 0.0
 	mesh.position.y = _stun_base_y
@@ -344,7 +347,6 @@ func _flash() -> void:
 func _die(direction: Vector3) -> void:
 	_set_state(State.DEAD)
 	died.emit()
-	_drop_pickups()
 	hurt_box.monitorable = false
 	set_collision_layer_value(1, false)
 	health_bar.visible = false
@@ -388,6 +390,8 @@ func stun(duration: float) -> void:
 	if state == State.DEAD:
 		return
 
+	_stun_frame = Engine.get_physics_frames()
+
 	_stun_bar = 0.0
 	_stun_idle_t = 0.0
 	if stun_bar != null:
@@ -425,16 +429,3 @@ func _stunned() -> void:
 		mesh.rotation.z = 0.0
 		_mat.albedo_color = _base_color
 		_set_state(State.REPOSITION)
-
-	
-## Le butin est lâché avant le tween de mort : sinon l'await retarde
-## l'apparition d'une demi-seconde, et le lien de cause à effet se perd.
-func _drop_pickups() -> void:
-	if pickup_scene == null or randf() > pickup_chance:
-		return
-
-	var n: int = 1 + (randi() % maxi(pickup_max, 1))
-	for i in n:
-		var p: Area3D = pickup_scene.instantiate()
-		get_tree().current_scene.add_child(p)
-		p.global_position = global_position + Vector3.UP * 0.6

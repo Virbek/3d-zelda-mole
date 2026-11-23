@@ -18,6 +18,7 @@
 [ext_resource type="PackedScene" uid="uid://cgvh4bybr63w8" path="res://prefab/Enemy/Boss/1Boss.tscn" id="13_pnog0"]
 [ext_resource type="Script" uid="uid://c00ikrals38ol" path="res://checkpoint.gd" id="18_1fd8v"]
 [ext_resource type="PackedScene" uid="uid://bh07vh14y6ii" path="res://first_room.tscn" id="18_63wju"]
+[ext_resource type="PackedScene" path="res://prefab/Enemy/EnemyMelee.tscn" id="19_63wju"]
 
 [sub_resource type="Environment" id="Environment_osq7l"]
 
@@ -231,3 +232,7 @@ script = ExtResource("18_1fd8v")
 shape = SubResource("SphereShape3D_osq7l")
 
 [node name="FirstRoom" parent="." unique_id=602238273 instance=ExtResource("18_63wju")]
+
+[node name="EnemyMelee" parent="." unique_id=30367844 instance=ExtResource("19_63wju")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7.9866734, 0.7397914, -3.3916893)
+player_path = NodePath("../Player")

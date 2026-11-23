@@ -38,9 +38,21 @@ var is_sprinting: bool = false
 @onready var rig: Node3D = $Rig
 
 
+## Repli si aucune caméra n'est active. Sinon, les entrées suivent l'angle
+## réel de la caméra : isométrique (45°) dans l'arène, de face (0°) dans le donjon.
 const CAM_YAW := deg_to_rad(45.0)
 
+
+func camera_yaw() -> float:
+	var cam := get_viewport().get_camera_3d()
+	return cam.global_rotation.y if cam != null else CAM_YAW
+
 var is_dodging: bool = false
+
+## Faux pendant un passage de porte : le Dungeon pilote alors la direction
+## via set_auto_walk_dir, et les entrées du joueur sont ignorées.
+var controls_enabled: bool = true
+var _auto_dir := Vector3.ZERO
 var is_invulnerable: bool = false
 var _dodge_t: float = 0.0
 var _dodge_dir := Vector3.ZERO
@@ -84,13 +96,15 @@ func _physics_process(delta: float) -> void:
 			rig.visible = true
 	# --- Entrées, converties dans le repère de la caméra ---
 	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
-	var direction := Vector3(input.x, 0.0, input.y).rotated(Vector3.UP, CAM_YAW)
+	var direction := Vector3(input.x, 0.0, input.y).rotated(Vector3.UP, camera_yaw())
+	if not controls_enabled:
+		direction = _auto_dir
 
 	# --- Esquive : déclenchement ---
 	if _dodge_cd > 0.0:
 		_dodge_cd = maxf(_dodge_cd - delta, 0.0)
 
-	if Input.is_action_just_pressed("dodge") and not is_dodging and _dodge_cd <= 0.0:
+	if controls_enabled and Input.is_action_just_pressed("dodge") and not is_dodging and _dodge_cd <= 0.0:
 		is_dodging = true
 		_iframe_t = 0.0
 		is_invulnerable = false
@@ -132,14 +146,14 @@ func _physics_process(delta: float) -> void:
 		is_invulnerable = false
 
 	# --- Sprint ---
-	is_sprinting = Input.is_action_pressed("sprint") and direction.length_squared() > 0.01
+	is_sprinting = controls_enabled and Input.is_action_pressed("sprint") and direction.length_squared() > 0.01
 
 	# --- Vitesse cible ---
 	var current_speed: float = sprint_speed if is_sprinting else speed
 	var target_vel: Vector3 = direction * current_speed
 
 	# On ne bouge pas pendant une attaque, mais on garde l'inertie du bond
-	if combat.is_attacking:
+	if combat.is_attacking and controls_enabled:
 		is_sprinting = false
 		target_vel = Vector3.ZERO
 	if combat.is_charging:
@@ -165,6 +179,27 @@ func _physics_process(delta: float) -> void:
 
 
 
+
+
+## Appelé par le Dungeon au passage d'une porte.
+func start_auto_walk(dir: Vector3) -> void:
+	controls_enabled = false
+	is_dodging = false
+	is_invulnerable = false
+	_auto_dir = dir
+	# Pleine vitesse d'emblée : un joueur arrêté contre une porte qui vient
+	# de s'ouvrir doit traverser aussi vite qu'un joueur qui arrive en marchant.
+	velocity.x = dir.x * speed
+	velocity.z = dir.z * speed
+
+
+func set_auto_walk_dir(dir: Vector3) -> void:
+	_auto_dir = dir
+
+
+func stop_auto_walk() -> void:
+	controls_enabled = true
+	_auto_dir = Vector3.ZERO
 
 
 func _apply_gravity(delta: float) -> void:

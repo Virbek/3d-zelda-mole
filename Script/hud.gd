@@ -5,6 +5,9 @@ extends CanvasLayer
 @export var pulse_decay: float = 1.8
 @export var low_health_threshold: float = 0.34
 
+## Optionnel : un Dungeon dont on affiche le nombre de clés.
+@export var dungeon_path: NodePath
+
 @export_group("Barres de vie")
 @export var bar_width: float = 14.0
 @export var bar_height: float = 46.0
@@ -35,6 +38,30 @@ func _ready() -> void:
 
 	_ratio = float(player.health) / float(player.max_health)
 	_refresh_bars(player.health, 0.0, player.recover_hits_required)
+
+	var dungeon: Node = get_node_or_null(dungeon_path) if not dungeon_path.is_empty() else null
+	if dungeon != null and dungeon.has_signal("keys_changed"):
+		_build_key_label()
+		dungeon.keys_changed.connect(_on_keys_changed)
+		_on_keys_changed(dungeon.keys)
+
+
+var _key_label: Label
+
+
+func _build_key_label() -> void:
+	_key_label = Label.new()
+	_key_label.position = Vector2(24, 24 + bar_height + 14)
+	_key_label.add_theme_font_size_override("font_size", 26)
+	_key_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.2))
+	_key_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	_key_label.add_theme_constant_override("outline_size", 6)
+	add_child(_key_label)
+
+
+func _on_keys_changed(count: int) -> void:
+	if _key_label != null:
+		_key_label.text = "Clés : %d" % count
 
 
 ## Une barre par pv max, construite par script — pas de .tscn à maintenir.
