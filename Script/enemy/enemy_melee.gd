@@ -70,7 +70,7 @@ signal died
 @export var stun_duration: float = 3.0
 @export var stun_color := Color(0.25, 1.0, 0.35)
 @export var stun_wobble: float = 0.12
-@export var stun_hits_required: int = 6
+@export var stun_hits_required: int = 4
 @export var stun_drain_delay: float = 0.6
 @export var stun_drain_rate: float = 0.8
 @export var reaction: String = "finisher"   ## ce que déclenche la commande réaction une fois étourdi
@@ -99,6 +99,7 @@ var _stun_frame: int = -1             ## frame physique où l'étourdissement a 
 var _mat: StandardMaterial3D
 var _base_color: Color
 var _base_scale := Vector3.ONE
+var _hit_react: HitReaction = null
 var _base_mesh_y: float = 0.0
 var _flash_tween: Tween
 var _tele_tween: Tween
@@ -113,6 +114,7 @@ func _ready() -> void:
 	add_to_group("enemy")
 	health = max_health
 	_base_scale = mesh.scale
+	_hit_react = HitReaction.attach(mesh)
 	_base_mesh_y = mesh.position.y
 	var base := mesh.get_active_material(0)
 	_mat = base.duplicate() if base != null else StandardMaterial3D.new()
@@ -394,6 +396,9 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 		_die(direction)
 		return
 
+	# Recul visible : plus marqué pour un coup lourd
+	_hit_react.play(direction, clampf(float(damage) / float(maxi(damage_per_hit, 1)), 1.0, 2.0))
+
 	# Le joueur appelle add_stun AVANT take_hit : le coup qui vient de remplir
 	# la jauge ne doit pas annuler l'étourdissement qu'il a lui-même déclenché.
 	# Tout coup suivant, lui, réveille l'ennemi (il passe en HURT ci-dessous).
@@ -421,6 +426,9 @@ func _flash() -> void:
 
 
 func _die(direction: Vector3) -> void:
+	if _hit_react != null:
+		_hit_react.stop()
+	Sfx.play("enemy_death", global_position)
 	_set_state(State.DEAD)
 	died.emit()
 	hurt_box.monitorable = false
@@ -469,6 +477,7 @@ func get_reaction() -> String:
 func stun(duration: float) -> void:
 	if state == State.DEAD:
 		return
+	Sfx.play("stun", global_position)
 
 	_stun_frame = Engine.get_physics_frames()
 
@@ -491,3 +500,9 @@ func stun(duration: float) -> void:
 
 func is_stunned() -> bool:
 	return state == State.STUNNED
+
+
+## Vrai pendant que l'ennemi prépare ou porte une attaque. Lu par le HUD
+## pour signaler une menace hors de l'écran.
+func is_threatening() -> bool:
+	return state == State.WINDUP or state == State.STRIKE

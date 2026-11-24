@@ -81,6 +81,7 @@ var _mesh_local_bottom: float = 0.0
 var _mat: StandardMaterial3D
 var _base_color: Color
 var _base_scale := Vector3.ONE
+var _hit_react: HitReaction = null
 var _flash_tween: Tween
 
 
@@ -96,6 +97,7 @@ func _ready() -> void:
 
 	health = max_health
 	_base_scale = mesh.scale
+	_hit_react = HitReaction.attach(mesh)
 	_mesh_rest_y = mesh.position.y
 	if mesh.mesh != null:
 		_mesh_local_bottom = mesh.mesh.get_aabb().position.y
@@ -223,6 +225,7 @@ func _impact() -> void:
 	_set_mesh_scale(_base_scale * Vector3(1.0 + squash_amount, 1.0 - squash_amount, 1.0 + squash_amount))
 
 	_shake(land_shake)
+	Sfx.play("boss_land", global_position, 3.0)
 	_landed_resolved = false
 	_set_state(State.LANDED)
 
@@ -361,6 +364,9 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 		_die()
 		return
 
+	# Recul visible : plus marqué pour un coup lourd
+	_hit_react.play(direction, 0.5 * clampf(float(damage) / float(maxi(damage_per_hit, 1)), 1.0, 2.0))
+
 	_flash()
 	_check_phase()
 
@@ -392,6 +398,12 @@ func is_stunned() -> bool:
 	return false
 
 
+## Vrai pendant que l'ennemi prépare ou porte une attaque. Lu par le HUD
+## pour signaler une menace hors de l'écran.
+func is_threatening() -> bool:
+	return state == State.WINDUP
+
+
 func _flash() -> void:
 	if _flash_tween != null and _flash_tween.is_running():
 		_flash_tween.kill()
@@ -404,6 +416,9 @@ func _flash() -> void:
 
 
 func _die() -> void:
+	if _hit_react != null:
+		_hit_react.stop()
+	Sfx.play("enemy_death", global_position, 4.0)
 	_set_state(State.DEAD)
 	died.emit()
 

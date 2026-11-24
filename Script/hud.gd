@@ -33,6 +33,10 @@ func _ready() -> void:
 	_mat = vignette.material as ShaderMaterial
 	_build_bars()
 
+	var threats := OffscreenThreats.new()
+	threats.name = "OffscreenThreats"
+	add_child(threats)
+
 	player.health_changed.connect(_on_health_changed)
 	player.recover_changed.connect(_on_recover_changed)
 

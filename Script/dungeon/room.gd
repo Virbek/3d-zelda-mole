@@ -37,6 +37,7 @@ var floor_color := Color(0.55, 0.52, 0.48)
 var wall_color := Color(0.38, 0.36, 0.34)
 var pillar_color := Color(0.45, 0.42, 0.40)
 var chunk_length: float = 2.0
+var spawn_telegraph_time: float = 0.8   ## durée de l'annonce au sol avant qu'un ennemi apparaisse
 
 var is_cleared: bool = false
 var is_active: bool = false
@@ -395,13 +396,27 @@ func _spawn(kind: String, local_pos: Vector3) -> void:
 	if scene == null:
 		push_warning("%s : scène '%s' manquante dans le Dungeon" % [name, kind])
 		return
+	# Compté tout de suite : la vague n'est pas finie tant qu'un ennemi
+	# annoncé n'est pas encore apparu (portes, vague suivante...).
+	_alive += 1
+	var token: int = _activation
+
+	# Annonce au sol, puis apparition. Si le joueur sort entre-temps,
+	# deactivate() change _activation et l'ennemi n'apparaît jamais.
+	var marker := SpawnMarker.new()
+	add_child(marker)
+	marker.position = local_pos
+	marker.play(spawn_telegraph_time, 1.4 if kind == "boss" else 0.7)
+	await get_tree().create_timer(spawn_telegraph_time, false).timeout
+	if token != _activation or not is_active:
+		return
+
 	var e: Node3D = scene.instantiate()
 	# Avant add_child : les ennemis lisent player_path dans leur _ready
 	e.set("player_path", player.get_path())
 	add_child(e)
 	e.position = local_pos + Vector3.UP * 0.05
 	_enemies.append(e)
-	_alive += 1
 	if e.has_signal("died"):
 		e.died.connect(_on_enemy_died)
 

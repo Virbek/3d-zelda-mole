@@ -514,7 +514,16 @@ func _auto_walk(target: Vector3, d: Vector3) -> void:
 
 func _on_room_cleared(room: DungeonRoom) -> void:
 	if room.cell == _current:
+		_play_clear_feedback()
 		_reopen_closed()
+
+
+## Ralenti + secousse sur le dernier ennemi : marque la fin du combat.
+func _play_clear_feedback() -> void:
+	HitStop.finale()
+	var cam := get_viewport().get_camera_3d()
+	if cam != null and cam.get_parent().has_method("shake"):
+		cam.get_parent().shake(0.4)
 
 
 func _on_key_collected(_room: DungeonRoom) -> void:

@@ -34,8 +34,12 @@ func _ready() -> void:
 
 
 func _physics_process(_delta: float) -> void:
-	global_position = player_pos() + Vector3.UP * 3.0
+	var p := _player()
+	if p != null:
+		global_position = p.global_position + Vector3.UP * 3.0
 
 
-func player_pos() -> Vector3:
-	return get_node("/root/Node3D/Player").global_position
+## Par le groupe plutôt qu'un chemin en dur : la racine ne s'appelle pas
+## pareil d'une scène à l'autre (TestingScene, DungeonTest...).
+func _player() -> Node3D:
+	return get_tree().get_first_node_in_group("player") as Node3D

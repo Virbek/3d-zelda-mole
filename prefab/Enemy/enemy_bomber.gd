@@ -64,6 +64,7 @@ var _hurt_t: float = 0.0
 var _mat: StandardMaterial3D
 var _base_color: Color
 var _base_scale := Vector3.ONE
+var _hit_react: HitReaction = null
 
 
 func _ready() -> void:
@@ -77,6 +78,7 @@ func _ready() -> void:
 
 	health = max_health
 	_base_scale = mesh.scale
+	_hit_react = HitReaction.attach(mesh)
 	var base := mesh.get_active_material(0)
 	_mat = base.duplicate() if base != null else StandardMaterial3D.new()
 	mesh.material_override = _mat
@@ -219,6 +221,9 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 		_die(direction)
 		return
 
+	# Recul visible : plus marqué pour un coup lourd
+	_hit_react.play(direction, clampf(float(damage) / float(maxi(damage_per_hit, 1)), 1.0, 2.0))
+
 	_knockback = direction * knockback_force
 	_hurt_t = 0.3
 	mesh.scale = _base_scale
@@ -234,9 +239,17 @@ func is_stunned() -> bool:
 	return false
 
 
+## Vrai pendant que l'ennemi prépare ou porte une attaque. Lu par le HUD
+## pour signaler une menace hors de l'écran.
+func is_threatening() -> bool:
+	return state == State.PRIMED
+
+
 ## Mort par les coups du joueur : il explose quand même. C'est tout l'intérêt
 ## de l'ennemi — le tuer ne suffit pas, il faut le tuer AU BON ENDROIT.
 func _die(direction: Vector3) -> void:
+	if _hit_react != null:
+		_hit_react.stop()
 	_explode()
 
 
@@ -245,6 +258,7 @@ func _explode() -> void:
 		return
 	_set_state(State.DEAD)
 	died.emit()
+	Sfx.play("enemy_death", global_position)
 
 	if blast_scene != null:
 		var z: Node3D = blast_scene.instantiate()

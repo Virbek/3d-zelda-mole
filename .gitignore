@@ -50,3 +50,6 @@ Desktop.ini
 # AI agent temporary logs/context dumps
 .claude/
 .cursor/
+
+# Sauvegardes temporaires de scènes créées par l'éditeur Godot
+*.tmp

@@ -15,7 +15,7 @@ extends Node
 ##   Sfx.play_ui("heal")                 — son non positionné
 
 @export var pool_size: int = 12
-@export var master_volume_db: float = 0.0
+@export var master_volume_db: float = -8.0   ## volume global de tous les sons (−10 dB ≈ perçu deux fois moins fort)
 
 ## Variation aléatoire de hauteur, pour que dix coups d'affilée ne soient pas
 ## dix fois exactement le même échantillon — c'est ce qui fatigue l'oreille.

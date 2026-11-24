@@ -47,7 +47,9 @@ extends Node
 
 @export_group("Rapprochement")
 @export var lunge_range: float = 3.5
-@export var lunge_speed: Array[float] = [12.0, 12.0, 6.0]
+## Poussée de départ (m/s) : freinée ensuite par l'accélération du joueur,
+## 5 m/s donne un glissé d'environ un demi-mètre.
+@export var lunge_speed: Array[float] = [5.0, 5.0, 4.0]
 @export var lunge_standoff: float = 1.6  ## en dessous, pas de rapprochement
 
 @export_group("Attaque chargée")
@@ -73,9 +75,18 @@ extends Node
 @export var spin_tick: float = 0.25          ## délai entre deux dégâts sur le même ennemi
 @export var spin_shake: float = 0.2
 
+@export_group("Esquive")
+## Un clic fait pendant l'esquive est gardé ce temps-là, puis rejoué à la sortie.
+## Un peu moins que la durée de l'esquive : un clic du tout début est oublié.
+@export var dodge_buffer_time: float = 0.2
+
+@export_group("Indication de réaction")
+@export var prompt_height: float = 2.2
+@export var prompt_color := Color(1.0, 0.85, 0.2)
+
 @export_group("Hit stop")
-@export var hit_stop_time: float = 0.06
-@export var hit_stop_scale: float = 0.05
+@export var hit_stop_time: float = 0.035
+@export var hit_stop_scale: float = 0.1
 
 @onready var player: CharacterBody3D = get_parent()
 @onready var rig: Node3D = get_node(rig_path)
@@ -107,6 +118,14 @@ var _punch_power: float = 0.0
 var _spin_t: float = 0.0
 var _spin_hits: Dictionary = {}   ## ennemi → temps du dernier dégât
 
+var _dodge_buffer_t: float = 0.0
+
+var _sparks: HitSparks = null
+
+var _prompt: Label3D = null
+var _using_pad: bool = false      ## dernier périphérique utilisé, pour le texte de la touche
+var _prompt_t: float = 0.0
+
 
 var is_attacking: bool:
 	get:
@@ -114,6 +133,10 @@ var is_attacking: bool:
 
 
 func _ready() -> void:
+	_build_prompt()
+	_sparks = HitSparks.new()
+	_sparks.name = "HitSparks"
+	add_child(_sparks)
 	if fist_l == null or fist_r == null:
 		push_warning("Combat : FistBox manquantes, les coups ne toucheront rien")
 		return
@@ -150,7 +173,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if not event.is_action_pressed("attack"):
 		return
-	if player.is_dodging or is_charging or is_punching or is_spinning:
+	if player.is_dodging:
+		# Mémorisé : rejoué à la sortie de l'esquive (voir _consume_dodge_buffer)
+		_dodge_buffer_t = dodge_buffer_time
+		return
+	if is_charging or is_punching or is_spinning:
 		return
 
 	if _step == 0:
@@ -171,6 +198,7 @@ func _physics_process(delta: float) -> void:
 		_process_spin(delta)
 		return
 
+	_consume_dodge_buffer(delta)
 	_handle_charge(delta)
 
 	if is_punching:
@@ -211,6 +239,21 @@ func _physics_process(delta: float) -> void:
 			_start(_next_combo_step(_last_step))
 
 
+## Un clic pendant l'esquive est rejoué dès qu'elle se termine, comme un
+## appui frais : relâché → coup normal, maintenu → charge.
+func _consume_dodge_buffer(delta: float) -> void:
+	if _dodge_buffer_t <= 0.0:
+		return
+	_dodge_buffer_t = maxf(_dodge_buffer_t - delta, 0.0)
+	if player.is_dodging or not player.controls_enabled:
+		return
+	if _step != 0 or _press_t >= 0.0 or is_charging or is_punching:
+		return
+	_dodge_buffer_t = 0.0
+	_press_step = _next_combo_step(_last_step) if _grace > 0.0 else 1
+	_press_t = 0.0
+
+
 func _start(step: int) -> void:
 	_step = step
 	_last_step = step
@@ -219,8 +262,10 @@ func _start(step: int) -> void:
 	_buffered = false
 	_hit_list.clear()
 	rig.play_attack(step)
+	# Le whoosh part même dans le vide : c'est lui qui dit « le coup est parti »
+	Sfx.play_ui("swing", -4.0 if step != 3 else 0.0)
 
-	##_lunge(step)
+	_lunge(step)
 
 	if step == 3:
 		_hop()
@@ -249,8 +294,9 @@ func _start_finisher(target: Node) -> void:
 	_start(3)
 
 
-## Rapproche le joueur de sa cible au démarrage d'un coup. Désactivé pour le
-## moment (voir _start) : gardé au cas où on en aurait de nouveau besoin.
+## Rapproche doucement le joueur de sa cible au démarrage d'un coup, et
+## l'oriente vers elle. Seulement entre lunge_standoff et lunge_range : au
+## contact on ne bouge pas, trop loin on ne « téléporte » pas.
 func _lunge(step: int) -> void:
 	var target = rig.get_magnet_target()
 	if target == null:
@@ -305,9 +351,11 @@ func _collect_hits() -> void:
 				else:
 					e.take_hit(dir.normalized())
 
-			if e.has_method("add_stun"):
-				e.add_stun()
-
+			if _step == 3:
+				_play_hit_sound("hit_heavy", e.global_position, 3.0)
+			else:
+				Sfx.play("hit_light", e.global_position)
+			_sparks.burst(fist.global_position, dir, _step == 3)
 			_hit_stop()
 
 			var side: float = 1.0 if fist == fist_r else -1.0
@@ -350,8 +398,12 @@ func _handle_charge(delta: float) -> void:
 		# Le ralentissement suit la mise en place du poing
 		charge_ramp = minf(charge_ramp + delta / maxf(charge_ramp_time, 0.01), 1.0)
 
+		var was_full: bool = _charge_t >= charge_max_time
 		_charge_t = minf(_charge_t + delta, charge_max_time)
 		rig.set_charge_progress(_charge_t / charge_max_time)
+		if not was_full and _charge_t >= charge_max_time:
+			rig.charge_full_flash()
+			_shake(0.12)
 
 		if not Input.is_action_pressed("attack"):
 			_release_charge()
@@ -390,6 +442,7 @@ func _release_charge() -> void:
 	_hit_list.clear()
 	_set_fists(false, true)
 	rig.play_punch(_punch_power, dest)
+	Sfx.play_ui("swing", 2.0)
 
 
 func _process_punch(delta: float) -> void:
@@ -430,11 +483,9 @@ func _punch_hits() -> void:
 			var dmg: int = maxi(1, int(round(lerpf(1.0, float(punch_damage), _punch_power))))
 			e.take_hit(dir.normalized(), dmg)
 
-		if e.has_method("add_stun"):
-			e.add_stun()
-
 		rig.hit_impact(1.0)
-		Sfx.play("hit_heavy", e.global_position)
+		_play_hit_sound("hit_heavy", e.global_position, 3.0)
+		_sparks.burst(fist_r.global_position, dir, true)
 		_hit_stop()
 		_shake(punch_shake * _punch_power)
 
@@ -505,6 +556,8 @@ func _spin_hits_check() -> void:
 			dir.y = 0.0
 			if dir.length() > 0.01:
 				e.take_hit(dir.normalized(), spin_damage)
+			Sfx.play("hit_light", e.global_position, -3.0)
+			_sparks.burst(fist.global_position, dir)
 			_shake(spin_shake)
 
 
@@ -514,9 +567,15 @@ func _spin_hits_check() -> void:
 func _hit_stop() -> void:
 	if hit_stop_time <= 0.0:
 		return
-	Engine.time_scale = hit_stop_scale
-	await get_tree().create_timer(hit_stop_time * hit_stop_scale, true, false, true).timeout
-	Engine.time_scale = 1.0
+	# Passe par l'autoload : un seul propriétaire de Engine.time_scale, sinon
+	# deux gels concurrents se remettent mutuellement à 1.0.
+	HitStop.hit(hit_stop_time, hit_stop_scale)
+
+
+## Joue key s'il existe, sinon retombe sur hit_light : un son manquant
+## ne doit pas rendre un coup muet.
+func _play_hit_sound(key: String, pos: Vector3, volume_db: float = 0.0) -> void:
+	Sfx.play(key if Sfx.sounds.has(key) else "hit_light", pos, volume_db)
 
 
 func _shake(strength: float) -> void:
@@ -531,9 +590,86 @@ func _shake(strength: float) -> void:
 ## Une seule touche pour plusieurs actions : c'est cette chaîne qui dit
 ## au joueur laquelle, plutôt que de le laisser deviner.
 func get_available_action() -> String:
-	if is_spinning or is_charging or is_punching or player.is_dodging or _step != 0:
-		return ""
-	var target = _find_stunned_nearby()
+	var target = _reaction_target()
 	if target == null:
 		return ""
 	return target.get_reaction() if target.has_method("get_reaction") else "spin"
+
+
+## L'ennemi étourdi sur lequel la commande réaction partirait maintenant.
+func _reaction_target():
+	if is_spinning or is_charging or is_punching or player.is_dodging or _step != 0:
+		return null
+	if not player.controls_enabled:
+		return null
+	return _find_stunned_nearby()
+
+
+# ---------------------------------------------------------------- INDICATION
+
+## Étiquette flottante au-dessus de l'ennemi étourdi à portée : elle affiche
+## la touche de la commande réaction. Créée par script, partagée par tous les
+## ennemis — c'est la portée du joueur qu'elle signale, pas l'ennemi lui-même.
+func _build_prompt() -> void:
+	_prompt = Label3D.new()
+	_prompt.top_level = true
+	_prompt.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_prompt.no_depth_test = true
+	_prompt.render_priority = 10
+	_prompt.font_size = 72
+	_prompt.outline_size = 18
+	_prompt.pixel_size = 0.006
+	_prompt.modulate = prompt_color
+	_prompt.outline_modulate = Color.BLACK
+	_prompt.visible = false
+	add_child(_prompt)
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
+		if event is InputEventJoypadMotion and absf(event.axis_value) < 0.3:
+			return
+		_using_pad = true
+	elif event is InputEventKey or event is InputEventMouseButton:
+		_using_pad = false
+
+
+func _process(delta: float) -> void:
+	if _prompt == null:
+		return
+	var target = _reaction_target()
+	if target == null or not is_instance_valid(target):
+		_prompt.visible = false
+		_prompt_t = 0.0
+		return
+
+	_prompt.text = _action_key_text("actionEvenement")
+	_prompt.global_position = target.global_position + Vector3.UP * prompt_height
+	# Apparition en pop puis légère pulsation, pour attirer l'œil sans clignoter
+	_prompt_t += delta
+	var pop: float = minf(_prompt_t / 0.12, 1.0)
+	var pulse: float = 1.0 + 0.08 * sin(_prompt_t * 8.0)
+	_prompt.scale = Vector3.ONE * lerpf(1.6, 1.0, pop) * pulse
+	_prompt.visible = true
+
+
+## Texte de la touche liée à action, pour le périphérique utilisé en dernier.
+func _action_key_text(action: String) -> String:
+	for ev in InputMap.action_get_events(action):
+		if _using_pad and ev is InputEventJoypadButton:
+			const PAD_NAMES := {0: "A", 1: "B", 2: "X", 3: "Y", 4: "Back", 6: "Start", 9: "LB", 10: "RB"}
+			return PAD_NAMES.get(ev.button_index, "Bouton %d" % ev.button_index)
+		if not _using_pad and ev is InputEventMouseButton:
+			match ev.button_index:
+				MOUSE_BUTTON_LEFT:
+					return "Clic gauche"
+				MOUSE_BUTTON_RIGHT:
+					return "Clic droit"
+				MOUSE_BUTTON_MIDDLE:
+					return "Clic molette"
+		if not _using_pad and ev is InputEventKey:
+			var code: Key = ev.keycode
+			if code == KEY_NONE:
+				code = DisplayServer.keyboard_get_keycode_from_physical(ev.physical_keycode)
+			return OS.get_keycode_string(code)
+	return "?"

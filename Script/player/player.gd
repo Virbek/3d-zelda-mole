@@ -67,6 +67,8 @@ var _dead := false
 var _recover_progress: float = 0.0
 var _recover_idle_t: float = 0.0
 
+var _ghosts: DodgeGhosts = null
+
 func _ready() -> void:
 	add_to_group("player")
 	if Checkpoints.has_checkpoint:
@@ -74,9 +76,18 @@ func _ready() -> void:
 	health = max_health
 	health_changed.emit(health, max_health)
 
+	_ghosts = DodgeGhosts.new()
+	_ghosts.name = "DodgeGhosts"
+	add_child(_ghosts)
+	_ghosts.setup(rig)
+
 func _physics_process(delta: float) -> void:
 	if _dead:
+		_ghosts.active = false
 		return
+	# Le dernier état d'esquive connu suffit : un fantôme d'avance ou de
+	# retard d'une frame ne se voit pas.
+	_ghosts.active = is_dodging
 
 	# --- Récupération de vie : redescend si on arrête de taper ---
 	if health < max_health and _recover_progress > 0.0:
@@ -158,6 +169,8 @@ func _physics_process(delta: float) -> void:
 		target_vel = Vector3.ZERO
 	if combat.is_charging:
 		target_vel *= 0.25
+	elif combat.is_spinning:
+		target_vel *= spin_speed_factor
 
 	# En l'air, on laisse filer : le bond du coup 3 ne doit pas être écrasé
 	if is_on_floor():
@@ -168,17 +181,16 @@ func _physics_process(delta: float) -> void:
 	if direction.length_squared() > 0.01:
 		var angle := atan2(-direction.x, -direction.z)
 		rotation.y = lerp_angle(rotation.y, angle, rotation_speed * delta)
-	
-	if combat.is_charging:
-		target_vel *= 0.25
-	elif combat.is_spinning:
-		target_vel *= spin_speed_factor
 
 	_apply_gravity(delta)
 	move_and_slide()
 
 
 
+
+
+func is_dead() -> bool:
+	return _dead
 
 
 ## Appelé par le Dungeon au passage d'une porte.
@@ -214,6 +226,7 @@ func take_damage(amount: int, direction: Vector3) -> void:
 
 	health = maxi(health - amount, 0)
 	health_changed.emit(health, max_health)
+	Sfx.play_ui("player_hurt")
 
 	# Un coup encaissé annule la récupération en cours : le prochain
 	# emplacement à regagner repart de zéro.
@@ -264,6 +277,7 @@ func add_recover_hit(amount: float = 1.0) -> void:
 
 func _die() -> void:
 	_dead = true
+	_ghosts.active = false
 	died.emit()
 	rig.visible = true
 	set_physics_process(false)

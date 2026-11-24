@@ -127,6 +127,16 @@ extends Node3D
 @export var punch_back_time: float = 0.22   ## retour
 @export var punch_height: float = 0.85      ## hauteur de vol, relative au corps
 
+@export_group("Retour des mains")
+## Après un coup, la main revient en arc autour du corps au lieu de couper
+## au plus court : une ligne droite la ferait passer à travers le torse.
+@export var return_time: float = 0.22
+@export var return_bulge: float = 0.12        ## l'arc s'écarte du corps à mi-chemin
+@export var body_avoid_radius: float = 0.55   ## distance minimale main ↔ axe du corps (torse 0.4 + poing 0.2, moins un léger contact)
+## Au-delà de cet écart (degrés), passer par l'avant ferait un trop grand
+## détour : la main prend le chemin le plus court, quitte à passer derrière.
+@export var return_front_max_degrees: float = 240.0
+
 @export_group("Impact")
 @export var impact_hold: float = 0.10      ## durée du blocage du poing
 @export var impact_recoil: float = 0.12    ## léger recul au contact
@@ -204,6 +214,18 @@ var _punch_k: float = 0.0          ## progression 0 → 1 sur l'aller-retour com
 var _punch_from := Vector3.ZERO
 var _punch_target := Vector3.ZERO
 var _punch_hit: bool = false       ## le poing a buté : il ne repart pas en avant
+
+## Lueur de charge pleine (voir charge_full_flash)
+@export var charge_glow_hold_alpha: float = 0.35
+var _glow_mat: StandardMaterial3D = null
+var _glow_tween: Tween = null
+var _glow_base_scale := Vector3.ZERO
+
+## Retour en arc, par main (0 = gauche, 1 = droite).
+## _return_t : 0 → 1 pendant le retour, -1 = démarrer à la prochaine frame libre,
+## >= 1 = inactif. _return_from : départ en coordonnées polaires du corps.
+var _return_t := [1.0, 1.0]
+var _return_from := [Vector3.ZERO, Vector3.ZERO]
 
 ## Impact
 var _impact_t: float = 0.0
@@ -457,6 +479,11 @@ func set_attack_progress(t: float) -> void:
 
 
 func end_attack() -> void:
+	# Le coup 3 finit déjà en garde ; les balayages finissent de l'autre côté
+	if _atk_kind == 1:
+		_return_t[1] = -1.0
+	elif _atk_kind == 2:
+		_return_t[0] = -1.0
 	_recover_side = 0.0 if _atk_kind == 3 else (1.0 if _atk_kind == 1 else -1.0)
 	_atk_kind = 0
 	_recover_t = attack_recover
@@ -549,6 +576,51 @@ func set_charge_progress(k: float) -> void:
 
 func end_charge() -> void:
 	_charging = false
+	_clear_charge_glow()
+
+
+## Appelé par Combat.gd quand la charge atteint son maximum : un flash blanc
+## et un gonflement du poing disent « relâche maintenant » sans regarder de jauge.
+## Une lueur résiduelle reste tant que la charge pleine est maintenue.
+func charge_full_flash() -> void:
+	var m := _hand_r_mesh()
+	if m == null:
+		return
+	if _glow_mat == null:
+		_glow_mat = StandardMaterial3D.new()
+		_glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_glow_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_glow_mat.albedo_color = Color(1.0, 1.0, 0.85, 0.0)
+	if _glow_base_scale == Vector3.ZERO:
+		_glow_base_scale = m.scale
+	m.material_overlay = _glow_mat
+
+	if _glow_tween != null and _glow_tween.is_running():
+		_glow_tween.kill()
+	_glow_tween = create_tween().set_parallel(true)
+	_glow_mat.albedo_color.a = 0.95
+	_glow_tween.tween_property(_glow_mat, "albedo_color:a", charge_glow_hold_alpha, 0.22)
+	m.scale = _glow_base_scale * 1.6
+	_glow_tween.tween_property(m, "scale", _glow_base_scale, 0.22)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func _clear_charge_glow() -> void:
+	if _glow_tween != null and _glow_tween.is_running():
+		_glow_tween.kill()
+	var m := _hand_r_mesh()
+	if m == null:
+		return
+	m.material_overlay = null
+	if _glow_base_scale != Vector3.ZERO:
+		m.scale = _glow_base_scale
+
+
+func _hand_r_mesh() -> MeshInstance3D:
+	for c in hand_r.get_children():
+		if c is MeshInstance3D:
+			return c
+	return null
 
 
 ## dest : le point du monde que le poing doit atteindre (fourni par Combat.gd,
@@ -620,7 +692,7 @@ func _punch_hand_position() -> Vector3:
 		if t < hold_end:
 			return _impact_pos
 		var kb: float = clampf((t - hold_end) / punch_back_time, 0.0, 1.0)
-		return _impact_pos.lerp(_hand_home(), kb * kb)
+		return _arc(_to_polar(_impact_pos), _to_polar(_hand_home()), kb)
 
 	# Destination réévaluée : le poing suit sa cible si elle bouge
 	var dest: Vector3 = _punch_target
@@ -631,13 +703,17 @@ func _punch_hand_position() -> Vector3:
 
 	if t < out_end:
 		var k: float = t / out_end
+		# Droit devant : ligne droite. Cible sur le côté opposé : la ligne
+		# droite traverserait le torse, le poing le contourne en arc.
+		if _crosses_body(_punch_from, dest):
+			return _arc(_to_polar(_punch_from), _to_polar(dest), k)
 		return _punch_from.lerp(dest, 1.0 - pow(1.0 - k, 3.0))
 
 	if t < hold_end:
 		return dest
 
 	var kb: float = clampf((t - hold_end) / punch_back_time, 0.0, 1.0)
-	return dest.lerp(_hand_home(), kb * kb)
+	return _arc(_to_polar(dest), _to_polar(_hand_home()), kb)
 
 
 ## Effets propres à la charge : tassement et recul.
@@ -873,7 +949,7 @@ func _update_hands(delta: float) -> void:
 	for h in _hands:
 		var local := Vector3(hand_offset.x * h.side, hand_offset.y, hand_offset.z)
 		if _spinning:
-			h.pos = _spin_hand_position(h.side, delta)
+			h.pos = _clip_world(body.global_position, _spin_hand_position(h.side, delta), hand_clip_radius)
 			h.vel = Vector3.ZERO
 			h.node.global_position = h.pos
 			h.node.rotation = body.rotation
@@ -887,7 +963,7 @@ func _update_hands(delta: float) -> void:
 		# Testé AVANT l'impact : pendant le poing chargé, c'est
 		# _punch_hand_position qui gère le blocage sur la cible.
 		if h.side > 0.0 and (_charging or _punching):
-			h.pos = driven_pos
+			h.pos = _clip_world(body.global_position, driven_pos, hand_clip_radius)
 			h.vel = Vector3.ZERO
 			h.node.global_position = h.pos
 			h.node.rotation = body.rotation
@@ -913,7 +989,22 @@ func _update_hands(delta: float) -> void:
 			driven = true
 
 		if driven:
-			h.pos = get_attack_position(_atk_t, h.side)
+			h.pos = _clip_world(body.global_position, get_attack_position(_atk_t, h.side), hand_clip_radius)
+			h.vel = Vector3.ZERO
+			h.node.global_position = h.pos
+			h.node.rotation = body.rotation
+			continue
+
+		# --- Retour en arc après un coup ---
+		var ri: int = 1 if h.side > 0.0 else 0
+		if _return_t[ri] < 1.0:
+			if _return_t[ri] < 0.0:
+				# Départ capturé ici, au premier instant où la main est libre
+				# (après le blocage d'impact éventuel), pas à la fin du coup.
+				_return_from[ri] = _to_polar(h.pos)
+				_return_t[ri] = 0.0
+			_return_t[ri] = minf(_return_t[ri] + delta / maxf(return_time, 0.01), 1.0)
+			h.pos = _clip_world(body.global_position, _arc(_return_from[ri], _to_polar(target), _return_t[ri]), hand_clip_radius)
 			h.vel = Vector3.ZERO
 			h.node.global_position = h.pos
 			h.node.rotation = body.rotation
@@ -981,6 +1072,8 @@ func set_spin_progress(k: float) -> void:
 
 func end_spin() -> void:
 	_spinning = false
+	_return_t[0] = -1.0
+	_return_t[1] = -1.0
 
 
 ## Les deux poings tournent en opposition, à hauteur de torse. Le rayon
@@ -993,12 +1086,74 @@ func _spin_hand_position(side: float, delta: float) -> Vector3:
 	# Ouverture/fermeture sur les 15 premiers et derniers pourcents
 	var open: float = clampf(_spin_k / 0.15, 0.0, 1.0)
 	var close: float = clampf((1.0 - _spin_k) / 0.15, 0.0, 1.0)
-	var r: float = spin_radius * minf(open, close)
+	# S'ouvre et se referme sur le rayon de repos des mains, pas sur 0 :
+	# à 0, les deux poings finiraient au milieu du torse.
+	var rest_r: float = Vector2(hand_offset.x, hand_offset.z).length()
+	var r: float = lerpf(rest_r, spin_radius, minf(open, close))
 
 	var a: float = _spin_angle_t + (0.0 if side > 0.0 else PI)
 	var center: Vector3 = _body_pos + Vector3.UP * (spin_height - body_height)
 
 	return center + Vector3(cos(a), 0.0, sin(a)) * r
+
+
+# ---------------------------------------------------------------- ARCS
+
+## Position monde → (angle, rayon, hauteur) autour de l'axe vertical du corps,
+## dans le repère du joueur. Angle 0 = devant, positif = à droite.
+func _to_polar(world: Vector3) -> Vector3:
+	var v: Vector3 = world - body.global_position
+	var local: Vector3 = Basis(Vector3.UP, player.rotation.y).inverse() * v
+	return Vector3(atan2(local.x, -local.z), Vector2(local.x, local.z).length(), local.y)
+
+
+func _from_polar(p: Vector3) -> Vector3:
+	var local := Vector3(sin(p.x) * p.y, p.z, -cos(p.x) * p.y)
+	return body.global_position + Basis(Vector3.UP, player.rotation.y) * local
+
+
+## Trajet en arc de from_p à to_p (polaires), k de 0 à 1. La main tourne
+## autour du corps au lieu de le traverser : son rayon ne descend jamais sous
+## body_avoid_radius, et s'écarte un peu à mi-chemin pour que l'arc se lise.
+func _arc(from_p: Vector3, to_p: Vector3, k: float) -> Vector3:
+	var e: float = 1.0 - pow(1.0 - clampf(k, 0.0, 1.0), 3.0)   # départ vif, arrivée douce
+
+	# Sans repliement, l'interpolation passe par l'avant (angle 0). Si ce
+	# détour est trop grand, on prend le chemin le plus court, par l'arrière.
+	var a_from: float = from_p.x
+	var a_to: float = to_p.x
+	if absf(a_to - a_from) > deg_to_rad(return_front_max_degrees):
+		a_to = a_from + wrapf(a_to - a_from, -PI, PI)
+
+	var a: float = lerpf(a_from, a_to, e)
+	var r: float = lerpf(from_p.y, to_p.y, e) + sin(e * PI) * return_bulge
+	r = maxf(r, body_avoid_radius)
+	var y: float = lerpf(from_p.z, to_p.z, e)
+	return _from_polar(Vector3(a, r, y))
+
+
+## Vrai si le segment a → b passe trop près de l'axe du corps (vue de dessus).
+func _crosses_body(a: Vector3, b: Vector3) -> bool:
+	var c := Vector2(body.global_position.x, body.global_position.z)
+	var a2 := Vector2(a.x, a.z)
+	var b2 := Vector2(b.x, b.z)
+	var ab: Vector2 = b2 - a2
+	var len2: float = ab.length_squared()
+	if len2 < 0.0001:
+		return false
+	var u: float = clampf((c - a2).dot(ab) / len2, 0.0, 1.0)
+	return (a2 + ab * u).distance_to(c) < body_avoid_radius
+
+
+## Comme _clip, mais seulement contre le décor : les ennemis sont ignorés.
+## Pour les poings qui frappent : arrêtés par un mur, mais ils doivent
+## pouvoir entrer dans un ennemi, sinon leur hitbox ne le toucherait jamais.
+func _clip_world(from: Vector3, to: Vector3, radius: float) -> Vector3:
+	var ex: Array[RID] = []
+	for e in get_tree().get_nodes_in_group("enemy"):
+		if e is CollisionObject3D and is_instance_valid(e):
+			ex.append((e as CollisionObject3D).get_rid())
+	return _clip(from, to, radius, ex)
 
 
 ## Empêche une partie du rig de traverser le décor. Le rayon part de l'ancre
@@ -1007,7 +1162,7 @@ func _spin_hand_position(side: float, delta: float) -> Vector3:
 ##
 ## Le rayon est forcé à l'horizontale : sinon il touche le sol dès que la
 ## partie descend, et la plaque n'importe où.
-func _clip(from: Vector3, to: Vector3, radius: float) -> Vector3:
+func _clip(from: Vector3, to: Vector3, radius: float, extra_exclude: Array[RID] = []) -> Vector3:
 	if not clip_enabled:
 		return to
 
@@ -1020,7 +1175,9 @@ func _clip(from: Vector3, to: Vector3, radius: float) -> Vector3:
 
 	var space := get_world_3d().direct_space_state
 	var q := PhysicsRayQueryParameters3D.create(a, b)
-	q.exclude = [player.get_rid()]
+	var ex: Array[RID] = [player.get_rid()]
+	ex.append_array(extra_exclude)
+	q.exclude = ex
 	q.collision_mask = clip_mask
 
 	var hit := space.intersect_ray(q)

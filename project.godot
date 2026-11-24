@@ -21,6 +21,7 @@ HitStop="*uid://cudf05fv2yq85"
 AttackToken="*uid://fg4ni32tb40h"
 Sfx="*uid://t737nmroqnqi"
 Checkpoints="*uid://dsgo6giwll18o"
+PauseMenu="*res://Script/ui/pause_menu.gd"
 
 [display]
 

@@ -44,9 +44,25 @@ radius = 0.4
 
 [sub_resource type="SphereMesh" id="SphereMesh_an2lv"]
 
+[sub_resource type="Resource" id="Resource_uitx5"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_j607p"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_w2dwu"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_kk8ni"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
 [sub_resource type="Resource" id="Resource_2hec7"]
 script = ExtResource("13_6mr3n")
-waves = PackedStringArray("..........\n.....m....\n..........\n..s.......\n..........\n.....m....\n..........\n..........")
+waves = PackedStringArray("..........\n..........\n..s.......\n....m.....\n..........\n..s.......\n..........\n..........")
 layout = "....P.....
 ....P.....
 ..........
@@ -56,23 +72,37 @@ layout = "....P.....
 ....P.....
 ....P....."
 
+[sub_resource type="Resource" id="Resource_1ra8h"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_0m8p7"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_voy1d"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
 [sub_resource type="Resource" id="Resource_qfhbt"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray("..........\n..........\n...m......\n..........\n..........\n...m......\n..........\n..........")
 
-[sub_resource type="Resource" id="Resource_tn7my"]
+[sub_resource type="Resource" id="Resource_0j4la"]
 script = ExtResource("13_6mr3n")
-waves = PackedStringArray("..........\n....m.....\n..........\n..........\n..........\n..........\n..........\n..........")
-lock_in = true
-key_source = 1
-layout = "..........
-..P....P..
-..........
-..........
-..........
-..........
-..........
-.........."
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_rmxld"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_yfs0k"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_732mr"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
 
 [sub_resource type="Resource" id="Resource_sjtd8"]
 script = ExtResource("13_6mr3n")
@@ -86,6 +116,18 @@ layout = "..........
 .P......P.
 .........."
 
+[sub_resource type="Resource" id="Resource_mxioc"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_6mr3n"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_2q2ox"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
 [sub_resource type="Resource" id="Resource_qxi6t"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray("..........\n..........\n....m.....\n..........\n..........\n....m.....\n..........\n..........", "..........\n..........\n......s...\n..m.......\n..........\n......s...\n..........\n..........")
@@ -98,6 +140,18 @@ layout = "..........
 ..........
 ..........
 .........."
+
+[sub_resource type="Resource" id="Resource_inaek"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_babem"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_km5kn"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
 
 [sub_resource type="Resource" id="Resource_aykaq"]
 script = ExtResource("13_6mr3n")
@@ -130,83 +184,7 @@ layout = "..........
 ..........
 .........."
 
-[sub_resource type="Resource" id="Resource_inaek"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_mxioc"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_0j4la"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_1ra8h"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_w2dwu"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_j607p"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_uitx5"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_kk8ni"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_voy1d"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_732mr"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_2q2ox"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_6mr3n"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_km5kn"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
 [sub_resource type="Resource" id="Resource_7wi2t"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_yi1xg"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_hxfd1"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_3v7c6"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_rmxld"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_babem"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_mrayk"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray()
 
@@ -214,13 +192,25 @@ waves = PackedStringArray()
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray()
 
-[sub_resource type="Resource" id="Resource_yfs0k"]
+[sub_resource type="Resource" id="Resource_3v7c6"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray()
 
-[sub_resource type="Resource" id="Resource_0m8p7"]
+[sub_resource type="Resource" id="Resource_hxfd1"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_yi1xg"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_mrayk"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_tn7my"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray("..........\n..........\n..........\n....m.....\n..........\n..........\n..........\n..........")
 
 [node name="Node3D" type="Node3D" unique_id=1847682603]
 
@@ -399,7 +389,7 @@ layout_doors = Dictionary[Vector4i, int]({
 Vector4i(-2, 1, -1, 1): 1,
 Vector4i(-1, 1, 0, 1): 1,
 Vector4i(0, 1, 0, 2): 1,
-Vector4i(0, 1, 1, 1): 2,
+Vector4i(0, 1, 1, 1): 1,
 Vector4i(1, 1, 2, 1): 1,
 Vector4i(2, 0, 2, 1): 2,
 Vector4i(2, 1, 2, 2): 1

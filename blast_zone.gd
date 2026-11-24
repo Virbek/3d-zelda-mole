@@ -163,6 +163,7 @@ func _update_follow(k: float, delta: float) -> void:
 func _detonate() -> void:
 	_done = true
 	detonated.emit()
+	Sfx.play("explosion", global_position)
 
 	# Un seul test au moment de l'explosion : c'est la position à cet instant
 	# qui compte, pas le fait d'être passé dans la zone.

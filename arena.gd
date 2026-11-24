@@ -50,6 +50,7 @@ signal arena_cleared
 @export var spawn_min_from_player: float = 7.0
 @export var wave_delay: float = 1.6       ## respiration entre deux vagues
 @export var start_delay: float = 1.0
+@export var spawn_telegraph_time: float = 0.8   ## durée de l'annonce au sol avant qu'un ennemi apparaisse
 
 @export_group("Boss")
 @export var spawn_boss: bool = true
@@ -69,6 +70,7 @@ var _running: bool = false
 var _boss_phase: bool = false
 var _spawn_points: Array[Vector3] = []
 var _spawned: Array[Node] = []
+var _spawn_token: int = 0   ## change à chaque remise à zéro : annule les apparitions en attente
 
 
 func _ready() -> void:
@@ -306,6 +308,12 @@ func _spawn(scene: PackedScene, pos: Vector3) -> void:
 		push_warning("Arena : scène d'ennemi manquante")
 		return
 
+	# Compté tout de suite : la vague n'est pas finie tant qu'un ennemi
+	# annoncé n'est pas encore apparu.
+	_alive += 1
+	if not await _telegraph_spawn(global_position + pos, 0.7):
+		return
+
 	var e: CharacterBody3D = scene.instantiate()
 
 	# Avant add_child : les @onready de l'ennemi lisent player_path pendant
@@ -319,7 +327,25 @@ func _spawn(scene: PackedScene, pos: Vector3) -> void:
 	if e.has_signal("died"):
 		e.died.connect(_on_enemy_died)
 
-	_alive += 1
+
+## Annonce au sol puis attente. Renvoie false si l'arène a été remise à zéro
+## pendant l'annonce (mort du joueur) : l'ennemi ne doit alors pas apparaître.
+func _telegraph_spawn(world_pos: Vector3, radius: float) -> bool:
+	var token: int = _spawn_token
+	var marker := SpawnMarker.new()
+	add_child(marker)
+	marker.global_position = Vector3(world_pos.x, global_position.y, world_pos.z)
+	marker.play(spawn_telegraph_time, radius)
+	await get_tree().create_timer(spawn_telegraph_time, false).timeout
+	return token == _spawn_token
+
+
+## Ralenti + secousse sur le dernier ennemi d'une vague : marque la fin du combat.
+func _play_clear_feedback() -> void:
+	HitStop.finale()
+	var cam := get_viewport().get_camera_3d()
+	if cam != null and cam.get_parent().has_method("shake"):
+		cam.get_parent().shake(0.4)
 
 
 func _on_enemy_died() -> void:
@@ -328,6 +354,7 @@ func _on_enemy_died() -> void:
 		return
 
 	_running = false
+	_play_clear_feedback()
 
 	if _boss_phase:
 		arena_cleared.emit()
@@ -361,8 +388,11 @@ func _start_boss() -> void:
 	pos.y = global_position.y
 
 	_boss_phase = true
-	_alive = 0
+	_alive = 1
 	_running = true
+
+	if not await _telegraph_spawn(pos, 1.4):
+		return
 
 	var b: CharacterBody3D = boss_scene.instantiate()
 	b.player_path = player.get_path()
@@ -386,6 +416,7 @@ func reset_encounter() -> void:
 		if is_instance_valid(e):
 			e.queue_free()
 	_spawned.clear()
+	_spawn_token += 1   # annule les apparitions encore annoncées
 
 	_wave = -1
 	_alive = 0
