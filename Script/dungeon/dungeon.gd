@@ -138,6 +138,7 @@ func _ready() -> void:
 		set_physics_process(false)
 		return
 
+	keys_changed.connect(_sync_door_keys)
 	_build()
 	keys_changed.emit(keys)
 	# Différé : le joueur a peut-être été replacé au checkpoint dans son _ready
@@ -330,6 +331,8 @@ func _build() -> void:
 		(_rooms[a] as DungeonRoom).add_veil_piece(door.half_a)
 		(_rooms[b] as DungeonRoom).add_veil_piece(door.half_b)
 		door.player_entered.connect(_on_door_entered)
+		door.unlock_requested.connect(_on_door_unlock_requested)
+		door.has_key = keys > 0
 		_doors.append(door)
 
 
@@ -441,14 +444,31 @@ func _on_door_entered(door: DungeonDoor) -> void:
 
 	match door.state:
 		DungeonDoor.DoorState.LOCKED:
-			if keys > 0:
-				keys -= 1
-				keys_changed.emit(keys)
-				door.open()   # la porte re-signalera le joueur une fois ouverte
-			else:
+			# On ne dépense plus la clé en touchant la porte : il faut appuyer
+			# sur « interact » devant (voir _on_door_unlock_requested).
+			if keys <= 0:
 				door.deny()
 		DungeonDoor.DoorState.OPEN:
 			_transition(door)
+
+
+## Le joueur a appuyé devant une porte verrouillée.
+func _on_door_unlock_requested(door: DungeonDoor) -> void:
+	if _transitioning or not _ready_done or not door.connects(_current):
+		return
+	if keys <= 0:
+		door.deny()
+		return
+	keys -= 1
+	keys_changed.emit(keys)
+	if player.has_method("begin_interaction"):
+		player.begin_interaction(door.global_position)
+	await door.play_unlock(player.global_position)
+	# Rendu avant l'ouverture : la porte ouverte relance le passage
+	# automatique, qui reprend lui-même les commandes du joueur.
+	if player.has_method("end_interaction"):
+		player.end_interaction()
+	door.open()
 
 
 func _transition(door: DungeonDoor) -> void:
@@ -529,3 +549,9 @@ func _play_clear_feedback() -> void:
 func _on_key_collected(_room: DungeonRoom) -> void:
 	keys += 1
 	keys_changed.emit(keys)
+
+
+## Les portes affichent « Ouvrir (clé) » ou « il faut une clé » selon le stock.
+func _sync_door_keys(count: int) -> void:
+	for d in _doors:
+		d.has_key = count > 0

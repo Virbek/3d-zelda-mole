@@ -25,7 +25,7 @@ const ENEMY_TOOLS := [
 	["b", "Kamikaze", Color(1.0, 0.55, 0.15)],
 	["B", "Boss", Color(0.4, 0.45, 1.0)],
 ]
-const KEY_SOURCES := ["Pas de clé", "Clé quand la salle est vidée", "Coffre dès l'arrivée", "Coffre quand la salle est vidée"]
+const KEY_SOURCES := ["Pas de clé", "Coffre (case k) quand la salle est vidée", "Coffre dès l'arrivée", "Coffre quand la salle est vidée"]
 
 var undo_redo: EditorUndoRedoManager
 var dungeon: Dungeon

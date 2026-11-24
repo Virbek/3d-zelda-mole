@@ -49,8 +49,9 @@ Colonne **Branché** : ✅ = le code joue déjà ce son dès que le fichier exis
 |---|---|---|---|
 | `room_clear` | Dernier ennemi de la salle (avec le ralenti) | Petit jingle de victoire (1–2 s) | ❌ |
 | `door_open` / `door_close` | Portes de salle | Pierre qui glisse | ❌ |
-| `key_pickup` | Ramasser une clé | Jingle court, brillant | ❌ |
-| `chest_open` | Ouvrir un coffre | Grincement + révélation | ❌ |
+| `door_unlock` | Clé qui tourne dans une porte verrouillée | Cliquetis de serrure | ✅ |
+| `chest_open` | Ouvrir un coffre (couvercle) | Grincement + révélation | ✅ |
+| `item_get` | Objet levé au-dessus de la tête (jeu en pause) | Petit jingle « objet obtenu » (1–2 s) | ✅ |
 | `heal` | Soin ramassé ou PV regagné en frappant | Note montante douce | ❌ |
 | `checkpoint` | Checkpoint activé | Carillon | ❌ |
 | `player_death` | Mort du joueur | Chute / note descendante | ❌ |

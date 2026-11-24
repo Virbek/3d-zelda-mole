@@ -8,6 +8,9 @@ extends Node3D
 @export var size_normal: float = 12.0
 @export var size_sprint: float = 14.5
 @export var zoom_smoothing: float = 2.5
+## Multiplie toutes les tailles ci-dessus (normal, sprint, combat, ciblage) :
+## 1 = tel quel, plus grand = caméra plus éloignée.
+@export var zoom_scale: float = 1.2
 
 @export_group("Secousse")
 @export var shake_decay: float = 4.0
@@ -62,7 +65,8 @@ var lock_on: Node = null
 
 
 func _ready() -> void:
-	return
+	# Pas de dézoom visible au lancement : on part directement à la bonne taille
+	cam.size = size_normal * zoom_scale
 
 
 func _physics_process(delta: float) -> void:
@@ -94,6 +98,7 @@ func _physics_process(delta: float) -> void:
 
 	var wanted: float = size_sprint if target.is_sprinting else size_normal
 	wanted += threat_zoom * _threat_w
+	wanted *= zoom_scale
 
 	# --- Zoom ---
 	

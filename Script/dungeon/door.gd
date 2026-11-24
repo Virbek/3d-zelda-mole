@@ -6,7 +6,9 @@ class_name DungeonDoor
 ## des deux, c'est le Dungeon qui la crée et qui la pilote.
 ##
 ## Elle ne décide de rien elle-même : quand le joueur entre dans sa zone,
-## elle émet player_entered et le Dungeon choisit (transition, clé, refus).
+## elle émet player_entered et le Dungeon choisit (transition, refus).
+## Verrouillée, elle affiche « E : Ouvrir » quand le joueur est devant et
+## émet unlock_requested quand il appuie ; le Dungeon dépense la clé.
 ##
 ## La zone de détection déborde dans les deux salles : sans ça, le joueur
 ## bloqué contre une porte verrouillée n'atteindrait jamais la zone.
@@ -14,6 +16,7 @@ class_name DungeonDoor
 enum DoorState { OPEN, LOCKED, CLOSED }
 
 signal player_entered(door: DungeonDoor)
+signal unlock_requested(door: DungeonDoor)
 
 var cell_a := Vector2i.ZERO
 var cell_b := Vector2i.ZERO
@@ -44,6 +47,12 @@ var _col: CollisionShape3D
 var _trigger: Area3D
 var _mark_mat: StandardMaterial3D
 var _tween: Tween
+
+## Tenu à jour par le Dungeon : change le texte affiché devant la porte.
+var has_key: bool = false
+var interact_depth: float = 1.4      ## distance devant la porte (de chaque côté) où l'on peut l'ouvrir
+var _prompt: InteractPrompt = null
+var _unlocking: bool = false
 
 
 func build() -> void:
@@ -101,6 +110,11 @@ func build() -> void:
 	_trigger.add_child(tcol)
 	add_child(_trigger)
 	_trigger.body_entered.connect(_on_body_entered)
+
+	if not Engine.is_editor_hint():
+		_prompt = InteractPrompt.new()
+		_prompt.position.y = height + 0.4
+		add_child(_prompt)
 
 	set_state_instant(state)
 
@@ -236,3 +250,73 @@ func _set_plates(on: bool) -> void:
 func _on_body_entered(body: Node3D) -> void:
 	if body.is_in_group("player"):
 		player_entered.emit(self)
+
+
+# ---------------------------------------------------------------- SERRURE
+
+func _process(_delta: float) -> void:
+	if _prompt == null:
+		return
+	if state != DoorState.LOCKED or _unlocking or not _player_in_front():
+		_prompt.hide_prompt()
+	elif has_key:
+		if not _prompt.visible or _prompt.modulate != Color.WHITE:
+			_prompt.show_action("Ouvrir (clé)")
+	else:
+		_prompt.show_text("Verrouillée : il faut une clé")
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if _prompt == null or not event.is_action_pressed(InteractPrompt.ACTION):
+		return
+	if state == DoorState.LOCKED and not _unlocking and _player_in_front():
+		get_viewport().set_input_as_handled()
+		unlock_requested.emit(self)
+
+
+## Joueur assez près de la porte, de l'un ou l'autre côté, et libre d'agir.
+func _player_in_front() -> bool:
+	var p := get_tree().get_first_node_in_group("player") as Node3D
+	if p == null or (p.has_method("can_interact") and not p.can_interact()):
+		return false
+	var local: Vector3 = global_transform.affine_inverse() * p.global_position
+	var lateral: float = local.z if axis_x else local.x
+	var normal: float = local.x if axis_x else local.z
+	return absf(lateral) <= width * 0.5 + 0.3 and absf(normal) <= depth * 0.5 + interact_depth
+
+
+## La clé s'enfonce dans la serrure côté joueur et tourne. N'ouvre pas la
+## porte : le Dungeon appelle open() ensuite, une fois le joueur relâché.
+func play_unlock(player_pos: Vector3) -> void:
+	_unlocking = true
+	_prompt.hide_prompt()
+	var n: Vector3 = Vector3.RIGHT if axis_x else Vector3.BACK
+	var side: float = signf((player_pos - global_position).dot(n))
+	if side == 0.0:
+		side = 1.0
+	var face: Vector3 = global_position + Vector3.UP * height * 0.5 + n * side * (depth * 0.5 + 0.08)
+
+	var key: Node3D = ItemData.build_key_model(lock_color)
+	add_child(key)
+	key.top_level = true
+	key.global_position = face + n * side * 0.7
+	# Le modèle a son anneau en haut (+Y) et sa tige vers le bas : on couche
+	# la clé pour que la tige pointe vers la serrure.
+	var axis: Vector3 = n * side
+	var base := Basis(axis.cross(Vector3.UP), axis, Vector3.UP)
+	key.global_basis = base
+	key.scale = Vector3.ONE * 0.01
+
+	Sfx.play("door_unlock", face)
+	var t := create_tween()
+	t.tween_property(key, "scale", Vector3.ONE, 0.15)
+	t.tween_property(key, "global_position", face + n * side * 0.25, 0.25)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	# Quart de tour dans la serrure
+	t.tween_method(func(a: float) -> void: key.global_basis = Basis(axis, a) * base, 0.0, PI * 0.5, 0.2)
+	t.tween_interval(0.1)
+	t.tween_property(key, "scale", Vector3.ONE * 0.01, 0.12)
+	await t.finished
+	key.queue_free()
+	_set_plates(false)
+	_unlocking = false

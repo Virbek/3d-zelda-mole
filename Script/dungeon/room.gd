@@ -95,8 +95,8 @@ func build() -> void:
 	# Le coffre est là où un « C » est dessiné dans le décor, et nulle part
 	# ailleurs : le jeu montre exactement ce que montre l'éditeur. Seul
 	# « coffre quand la salle est vidée » le fait attendre la fin du combat.
-	if _has_chest() and data.key_source != RoomData.KeySource.CHEST_ON_CLEAR:
-		_spawn_chest()
+	if _has_chest() and data.key_source == RoomData.KeySource.CHEST:
+		_spawn_chest(_chest_pos)
 
 
 ## Un mur, coupé en deux autour de la porte s'il y en a une, avec un linteau
@@ -481,17 +481,19 @@ func _on_all_dead() -> void:
 	cleared.emit(self)
 
 
-# ---------------------------------------------------------------- CLÉS
+# ---------------------------------------------------------------- RÉCOMPENSE
 
 func _give_reward() -> void:
 	match data.key_source:
 		RoomData.KeySource.ON_CLEAR:
-			if not _key_given:
-				_key_given = true
-				_spawn_key.call_deferred(_key_pos)
+			# Plus de clé posée au sol : un coffre apparaît à la place de la
+			# clé (case « k »), ou sur la case « C », sinon au centre.
+			if _chest == null and not _key_given:
+				var pos: Vector3 = _key_pos if data.layout.contains("k") else _chest_pos
+				_spawn_chest.call_deferred(pos, true)
 		RoomData.KeySource.CHEST_ON_CLEAR:
 			if _chest == null and _has_chest():
-				_spawn_chest.call_deferred()
+				_spawn_chest.call_deferred(_chest_pos, true)
 
 
 ## Coffre seulement si le décor en contient un.
@@ -499,33 +501,40 @@ func _has_chest() -> bool:
 	return data.layout.contains("C")
 
 
-func _spawn_chest() -> void:
+func _spawn_chest(local_pos: Vector3, animated: bool = false) -> void:
 	_chest = DungeonChest.new()
 	_chest.name = "Chest"
 	add_child(_chest)
-	_chest.position = _chest_pos
+	_chest.position = local_pos
 	_chest.opened.connect(_on_chest_opened)
 	_pieces.append(_chest)
 	_apply_veil(_veil_k)
+	if animated and not Engine.is_editor_hint():
+		_chest.appear()
+		_push_player_out_of(_chest)
 
 
-func _on_chest_opened() -> void:
-	if _key_given:
+## Un coffre qui apparaît sur le joueur l'enfermerait dans sa boîte de
+## collision : on le décale juste à côté.
+func _push_player_out_of(chest: DungeonChest) -> void:
+	var p := get_tree().get_first_node_in_group("player") as Node3D
+	if p == null:
 		return
-	_key_given = true
-	# Devant le coffre, côté caméra. Différé : on est dans un signal de
-	# collision, Godot interdit de créer une zone physique à ce moment-là.
-	_spawn_key.call_deferred(_chest.position + Vector3(0.0, 0.0, 1.4))
+	var min_d: float = maxf(chest.size.x, chest.size.z) * 0.5 + 0.6
+	var d := p.global_position - chest.global_position
+	d.y = 0.0
+	if d.length() >= min_d:
+		return
+	if d.length_squared() < 0.0001:
+		d = Vector3.BACK   # côté caméra
+	p.global_position = chest.global_position + d.normalized() * min_d + Vector3.UP * (p.global_position.y - chest.global_position.y)
 
 
-func _spawn_key(local_pos: Vector3) -> void:
-	var k := KeyPickup.new()
-	k.name = "Key"
-	add_child(k)
-	k.position = local_pos
-	k.collected.connect(_on_key_collected)
-	_pieces.append(k)
-	_apply_veil(_veil_k)
+## Le coffre a été ouvert et l'objet présenté : on applique son effet.
+func _on_chest_opened(item: ItemData) -> void:
+	if item.id == &"key" and not _key_given:
+		_key_given = true
+		_on_key_collected()
 
 
 func _on_key_collected() -> void:

@@ -227,6 +227,14 @@ var _glow_base_scale := Vector3.ZERO
 var _return_t := [1.0, 1.0]
 var _return_from := [Vector3.ZERO, Vector3.ZERO]
 
+## Pose « objet obtenu » (voir present_item)
+@export_group("Objet obtenu")
+@export var present_lean_degrees: float = 14.0   ## cambrure du buste vers l'arrière
+@export var present_fist_height: float = 0.95    ## poing au-dessus du centre du corps
+@export var present_item_height: float = 0.45    ## objet au-dessus du poing
+var _presenting: bool = false
+var _present_item: Node3D = null
+
 ## Impact
 var _impact_t: float = 0.0
 var _impact_pos := Vector3.ZERO
@@ -263,6 +271,8 @@ func _physics_process(delta: float) -> void:
 	if _ragdoll:
 		_update_ragdoll(delta)
 		return
+	if _presenting:
+		return   # la pose « objet obtenu » tient le corps et les mains
 
 	# La cible est libre entre deux coups (le marqueur peut donc l'afficher en
 	# continu), mais verrouillée pendant une frappe : sinon le poing zigzaguerait
@@ -1042,6 +1052,63 @@ func _update_hands(delta: float) -> void:
 
 		h.node.global_position = h.pos
 		h.node.rotation = body.rotation
+
+
+# ---------------------------------------------------------------- OBJET OBTENU
+
+## Lève le poing droit au-dessus de la tête, cambre le buste et pose `item`
+## sur le poing. Les tweens tournent même jeu en pause : le coffre fige le
+## monde pendant la présentation. Le rig ne simule plus rien jusqu'à
+## end_present().
+func present_item(item: Node3D) -> Tween:
+	_presenting = true
+	_clear_charge_glow()
+	var yaw := Basis(Vector3.UP, player.rotation.y)
+	var center: Vector3 = body.global_position
+	var fist_r: Vector3 = center + yaw * Vector3(0.12, present_fist_height, -0.05)
+	var fist_l: Vector3 = center + yaw * Vector3(-0.5, -0.1, 0.05)
+
+	_present_item = item
+	add_child(item)
+	item.top_level = true
+	item.global_position = fist_r + Vector3.UP * (present_item_height - 0.25)
+	item.scale = Vector3.ONE * 0.01
+
+	var t := create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).set_parallel(true)
+	t.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.tween_property(hand_r, "global_position", fist_r, 0.3)
+	t.tween_property(hand_l, "global_position", fist_l, 0.3)
+	t.tween_property(body, "global_position", center + Vector3.UP * 0.06, 0.3)
+	t.tween_property(body, "rotation", Vector3(deg_to_rad(present_lean_degrees), player.rotation.y, 0.0), 0.3)
+	# L'objet jaillit au-dessus du poing un peu après le bras
+	t.tween_property(item, "global_position", fist_r + Vector3.UP * present_item_height, 0.35).set_delay(0.15)
+	t.tween_property(item, "scale", Vector3.ONE, 0.35).set_delay(0.15)
+	# Rotation lente de l'objet ; le tween vit et meurt avec lui
+	var spin := item.create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).set_loops()
+	spin.tween_property(item, "rotation:y", TAU, 3.0).as_relative()
+	return t
+
+
+## Fin de la présentation : l'objet disparaît, le corps se redresse puis le
+## rig reprend la main. Les poings rejoignent leur place en arc.
+func end_present() -> Tween:
+	var t := create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).set_parallel(true)
+	if _present_item != null and is_instance_valid(_present_item):
+		t.tween_property(_present_item, "scale", Vector3.ONE * 0.01, 0.15).set_ease(Tween.EASE_IN)
+	t.tween_property(body, "global_position", _body_pos, 0.18)
+	t.tween_property(body, "rotation", Vector3(0.0, player.rotation.y, 0.0), 0.18)
+	t.chain().tween_callback(func() -> void:
+		if _present_item != null and is_instance_valid(_present_item):
+			_present_item.queue_free()
+		_present_item = null
+		for h in _hands:
+			h.pos = h.node.global_position
+			h.vel = Vector3.ZERO
+		_return_t[0] = -1.0
+		_return_t[1] = -1.0
+		_presenting = false
+	)
+	return t
 
 
 ## Le poing bute sur ce qu'il a touché au lieu de poursuivre sa trajectoire.

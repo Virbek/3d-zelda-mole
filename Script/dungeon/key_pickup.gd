@@ -33,27 +33,7 @@ func _ready() -> void:
 	_visual.position.y = hover_y
 	add_child(_visual)
 
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.metallic = 0.6
-	mat.roughness = 0.3
-	mat.emission_enabled = true
-	mat.emission = color
-	mat.emission_energy_multiplier = 0.35
-
-	var ring := MeshInstance3D.new()
-	var torus := TorusMesh.new()
-	torus.inner_radius = 0.1
-	torus.outer_radius = 0.22
-	ring.mesh = torus
-	ring.rotation.x = PI * 0.5
-	ring.position.y = 0.3
-	ring.material_override = mat
-	_visual.add_child(ring)
-
-	_add_part(Vector3(0.09, 0.5, 0.09), Vector3(0.0, -0.08, 0.0), mat)
-	_add_part(Vector3(0.16, 0.07, 0.09), Vector3(0.1, -0.22, 0.0), mat)
-	_add_part(Vector3(0.12, 0.07, 0.09), Vector3(0.08, -0.32, 0.0), mat)
+	_visual.add_child(ItemData.build_key_model(color))
 
 	body_entered.connect(_on_body_entered)
 
@@ -61,16 +41,6 @@ func _ready() -> void:
 	_visual.scale = Vector3.ONE * 0.01
 	create_tween().tween_property(_visual, "scale", Vector3.ONE, 0.35)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-
-
-func _add_part(size: Vector3, pos: Vector3, mat: Material) -> void:
-	var m := MeshInstance3D.new()
-	var b := BoxMesh.new()
-	b.size = size
-	m.mesh = b
-	m.position = pos
-	m.material_override = mat
-	_visual.add_child(m)
 
 
 func _process(delta: float) -> void:

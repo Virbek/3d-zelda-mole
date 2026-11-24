@@ -13,12 +13,12 @@ class_name RoomData
 ## le fond de la salle (nord), le bas est côté caméra. Le plus simple est de
 ## les dessiner à la souris dans le panneau « Donjon » de l'éditeur.
 ##
-##   layout : P pilier   C coffre   k emplacement de la clé   . vide
+##   layout : P pilier   C coffre   k coffre de fin de combat   . vide
 ##   vagues : c chargeur   s tireur   b kamikaze   m corps à corps   B boss
 
 enum KeySource {
 	NONE,            ## pas de clé dans cette salle
-	ON_CLEAR,        ## une clé apparaît quand tous les ennemis sont morts
+	ON_CLEAR,        ## un coffre à clé apparaît sur la case « k » quand tous les ennemis sont morts
 	CHEST,           ## un coffre contenant une clé est là dès l'arrivée
 	CHEST_ON_CLEAR,  ## le coffre n'apparaît qu'une fois la salle vidée
 }

@@ -63,10 +63,11 @@ waves = PackedStringArray()
 [sub_resource type="Resource" id="Resource_2hec7"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray("..........\n..........\n..s.......\n....m.....\n..........\n..s.......\n..........\n..........")
+key_source = 2
 layout = "....P.....
 ....P.....
 ..........
-.C........
+.Ck.......
 ..........
 ..........
 ....P.....
@@ -103,6 +104,10 @@ waves = PackedStringArray()
 [sub_resource type="Resource" id="Resource_732mr"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_tn7my"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray("..........\n..........\n..........\n....m.....\n..........\n..........\n..........\n..........")
 
 [sub_resource type="Resource" id="Resource_sjtd8"]
 script = ExtResource("13_6mr3n")
@@ -207,10 +212,6 @@ waves = PackedStringArray()
 [sub_resource type="Resource" id="Resource_mrayk"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray()
-
-[sub_resource type="Resource" id="Resource_tn7my"]
-script = ExtResource("13_6mr3n")
-waves = PackedStringArray("..........\n..........\n..........\n....m.....\n..........\n..........\n..........\n..........")
 
 [node name="Node3D" type="Node3D" unique_id=1847682603]
 
@@ -389,7 +390,7 @@ layout_doors = Dictionary[Vector4i, int]({
 Vector4i(-2, 1, -1, 1): 1,
 Vector4i(-1, 1, 0, 1): 1,
 Vector4i(0, 1, 0, 2): 1,
-Vector4i(0, 1, 1, 1): 1,
+Vector4i(0, 1, 1, 1): 2,
 Vector4i(1, 1, 2, 1): 1,
 Vector4i(2, 0, 2, 1): 2,
 Vector4i(2, 1, 2, 2): 1

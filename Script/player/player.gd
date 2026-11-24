@@ -205,6 +205,33 @@ func start_auto_walk(dir: Vector3) -> void:
 	velocity.z = dir.z * speed
 
 
+## Appelé par un coffre : le joueur s'arrête, se tourne vers lui et ne
+## répond plus aux commandes jusqu'à end_interaction().
+func begin_interaction(face_pos: Vector3) -> void:
+	controls_enabled = false
+	is_dodging = false
+	is_invulnerable = false
+	_auto_dir = Vector3.ZERO
+	velocity.x = 0.0
+	velocity.z = 0.0
+	var to := face_pos - global_position
+	if Vector2(to.x, to.z).length_squared() > 0.0001:
+		rotation.y = atan2(-to.x, -to.z)
+	rig.visible = true
+
+
+func end_interaction() -> void:
+	controls_enabled = true
+	_auto_dir = Vector3.ZERO
+
+
+## Vrai si le joueur peut lancer une interaction (ouvrir un coffre...).
+func can_interact() -> bool:
+	return not _dead and controls_enabled and not is_dodging and is_on_floor() \
+		and not combat.is_attacking and not combat.is_charging \
+		and not combat.is_punching and not combat.is_spinning
+
+
 func set_auto_walk_dir(dir: Vector3) -> void:
 	_auto_dir = dir
 

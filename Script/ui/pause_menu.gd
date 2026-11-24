@@ -62,6 +62,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## Pas de pause pendant la mort (l'écran de game over prend le relais).
 func _can_pause() -> bool:
+	# Déjà en pause pour autre chose (écran « objet obtenu ») : on ne s'en mêle pas
+	if get_tree().paused:
+		return false
 	var p := get_tree().get_first_node_in_group("player")
 	if p == null:
 		return false
