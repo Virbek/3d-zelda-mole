@@ -36,7 +36,27 @@ var scenes: Dictionary = {}      ## "charger" / "shooter" / "bomber" / "melee" /
 var floor_color := Color(0.55, 0.52, 0.48)
 var wall_color := Color(0.38, 0.36, 0.34)
 var pillar_color := Color(0.45, 0.42, 0.40)
+var with_lamps: bool = true
+var with_decor: bool = true
+
+## Lampes murales : seule vraie source de lumière de la raffinerie ensevelie
+const LAMP_COLOR := Color(1.0, 0.62, 0.3)
+const LAMP_ENERGY := 0.4
+const LAMP_RANGE := 7.0
+## 1 = décroissance douce. Plus haut, la lumière se concentre en un point
+## chaud sous l'applique (halo trop marqué sur le mur et le sol).
+const LAMP_FALLOFF := 1.0
+
 var chunk_length: float = 2.0
+
+## Vue de la caméra, les murs côté caméra cachaient la salle : le mur du bas
+## (+Z) n'est plus qu'un muret, et les murs de côté descendent en escalier
+## vers lui. Les collisions, elles, gardent toute la hauteur.
+var ledge_height: float = 0.8
+
+## Décalage des pièces posées sur un mur ou un pilier, pour qu'aucune face
+## ne soit exactement au même niveau qu'une autre (sinon elles scintillent).
+const Z_LIFT := 0.02
 var spawn_telegraph_time: float = 0.8   ## durée de l'annonce au sol avant qu'un ennemi apparaisse
 
 var is_cleared: bool = false
@@ -90,6 +110,13 @@ func build() -> void:
 	_build_layout()
 	if _pillars.is_empty():
 		_build_pillars()
+	if with_lamps:
+		_build_lamps()
+	if with_decor:
+		var avoid: Array[Vector3] = _pillars.duplicate()
+		avoid.append(_chest_pos)
+		avoid.append(_key_pos)
+		RoomDecor.build(self, avoid)
 	_build_veil()
 
 	# Le coffre est là où un « C » est dessiné dans le décor, et nulle part
@@ -106,7 +133,7 @@ func _build_wall(dir: Vector2i, length: float, center: Vector3, along_x: bool, t
 	var y: float = wall_height * 0.5
 
 	if not doors.get(dir, false):
-		_add_wall_run(n, length, center + Vector3(0.0, y, 0.0), along_x, thick)
+		_add_wall_run(n, length, center + Vector3(0.0, y, 0.0), along_x, thick, dir)
 		return
 
 	var seg: float = (length - door_width) * 0.5
@@ -117,24 +144,65 @@ func _build_wall(dir: Vector2i, length: float, center: Vector3, along_x: bool, t
 			p.x += off * s
 		else:
 			p.z += off * s
-		_add_wall_run("%s_%d" % [n, int(s)], seg, p, along_x, thick)
+		_add_wall_run("%s_%d" % [n, int(s)], seg, p, along_x, thick, dir)
 
 	var lintel_h: float = wall_height - door_height
 	if lintel_h > 0.01:
 		var lp: Vector3 = center + Vector3(0.0, door_height + lintel_h * 0.5, 0.0)
 		var ls := Vector3(door_width, lintel_h, thick) if along_x else Vector3(thick, lintel_h, door_width)
-		_add_box(n + "_Lintel", ls, lp, wall_color)
+		# Au-dessus d'un muret, un linteau flotterait : collision seule
+		var lintel_visual: float = -1.0 if _visual_wall_height(dir, lp) >= wall_height else 0.0
+		_add_box(n + "_Lintel", ls, lp, wall_color, true, lintel_visual)
 
 
 ## Un pan de mur, découpé en tronçons pour que le voile le révèle petit à petit.
-func _add_wall_run(n: String, length: float, center: Vector3, along_x: bool, thick: float) -> void:
+func _add_wall_run(n: String, length: float, center: Vector3, along_x: bool, thick: float, dir: Vector2i = Vector2i.ZERO) -> void:
 	var count: int = maxi(1, int(ceil(length / maxf(chunk_length, 0.5))))
 	var piece: float = length / float(count)
 	for i in count:
 		var off: float = -length * 0.5 + piece * (float(i) + 0.5)
 		var p: Vector3 = center + (Vector3(off, 0.0, 0.0) if along_x else Vector3(0.0, 0.0, off))
 		var size := Vector3(piece, wall_height, thick) if along_x else Vector3(thick, wall_height, piece)
-		_add_box("%s_%d" % [n, i], size, p, wall_color)
+		var vh: float = _visual_wall_height(dir, p)
+		var mesh := _add_box("%s_%d" % [n, i], size, p, wall_color, true, vh if vh < wall_height else -1.0)
+		if mesh != null:
+			_add_wall_cap(mesh, size, minf(vh, wall_height))
+
+
+## Hauteur visible d'un tronçon de mur. Fond : pleine hauteur. Bas (+Z) :
+## muret. Côtés : pleine hauteur jusqu'au milieu (les portes y sont), puis
+## en escalier jusqu'au muret, côté caméra.
+func _visual_wall_height(dir: Vector2i, p: Vector3) -> float:
+	if dir == Vector2i(0, 1):
+		return ledge_height
+	if dir.x != 0:
+		var hz: float = room_size.y * 0.5
+		var start: float = door_width * 0.5 + 0.5   # au-delà de l'embrasure des portes latérales
+		if p.z <= start:
+			return wall_height
+		var t: float = clampf((p.z - start) / maxf(hz - start, 0.01), 0.0, 1.0)
+		return lerpf(wall_height, ledge_height, t)
+	return wall_height
+
+
+## Arête de roche plus sombre sur le dessus d'un tronçon : vue de haut, le
+## mur a un bord net au lieu d'un aplat uni.
+func _add_wall_cap(wall: MeshInstance3D, size: Vector3, visible_h: float) -> void:
+	var cap := MeshInstance3D.new()
+	var b := BoxMesh.new()
+	# Débord seulement dans l'épaisseur du mur : dans la longueur, l'arête
+	# chevaucherait celle du tronçon voisin (deux dessus confondus = z-fighting)
+	var along_x: bool = size.x > size.z
+	b.size = Vector3(size.x if along_x else size.x + 0.06, 0.12, size.z + 0.06 if along_x else size.z)
+	cap.mesh = b
+	var mesh_h: float = (wall.mesh as BoxMesh).size.y
+	# Légèrement au-dessus du mur : sinon les deux dessus sont au même niveau
+	cap.position = Vector3(0.0, mesh_h * 0.5 - 0.06 + Z_LIFT, 0.0)
+	var m := StandardMaterial3D.new()
+	m.albedo_color = wall_color.darkened(0.35)
+	cap.material_override = m
+	cap.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	wall.add_child(cap)
 
 
 ## Convertit une case (colonne, rangée) d'une grille cols × rows en position
@@ -174,7 +242,10 @@ func _build_layout() -> void:
 				# Un pilier remplit sa case : plusieurs P côte à côte font un mur.
 				_pillars.append(pos)
 				_pillar_radius = maxf(cell.x, cell.y) * 0.5
-				_add_box("Block%d" % i, Vector3(cell.x, wall_height, cell.y), pos + Vector3(0.0, wall_height * 0.5, 0.0), pillar_color)
+				var bs := Vector3(cell.x, wall_height, cell.y)
+				var bh: float = _pillar_visual_height(pos)
+				var block := _add_box("Block%d" % i, bs, pos + Vector3(0.0, wall_height * 0.5, 0.0), pillar_color, true, bh if bh < wall_height else -1.0)
+				_decorate_pillar(block, bs, bh)
 			"C":
 				_chest_pos = pos
 			"k":
@@ -194,7 +265,114 @@ func _build_pillars() -> void:
 		)
 		_pillars.append(Vector3(p.x, 0.0, p.z))
 		_pillar_radius = data.pillar_size * 0.5
-		_add_box("Pillar%d" % i, Vector3(data.pillar_size, wall_height, data.pillar_size), p, pillar_color)
+		var ps := Vector3(data.pillar_size, wall_height, data.pillar_size)
+		var ph: float = _pillar_visual_height(p)
+		var pillar := _add_box("Pillar%d" % i, ps, p, pillar_color, true, ph if ph < wall_height else -1.0)
+		_decorate_pillar(pillar, ps, ph)
+
+
+## Comme les murs de côté : intacts au fond, tronqués côté caméra (des
+## colonnes effondrées) pour ne pas masquer la salle.
+func _pillar_visual_height(p: Vector3) -> float:
+	var hz: float = room_size.y * 0.5
+	if p.z <= 0.0:
+		return wall_height
+	var t: float = clampf(p.z / maxf(hz, 0.01), 0.0, 1.0)
+	return lerpf(wall_height, 1.6, t)
+
+
+## Colonne de soutènement de la raffinerie : socle de roche, fût rouillé,
+## bandes d'acier, bande de danger et chapiteau. Tout est enfant du visuel
+## principal (matériaux standards) : la caméra estompe la colonne d'un bloc.
+func _decorate_pillar(pillar: MeshInstance3D, size: Vector3, visible_h: float) -> void:
+	if pillar == null:
+		return
+	var h: float = minf(visible_h, wall_height)
+	var bottom: float = -h * 0.5   # repère du visuel : centré sur sa hauteur
+	var parts: Array = [
+		# [taille XZ (× taille du pilier), hauteur, hauteur du centre depuis le sol, couleur]
+		[1.18, 0.45, 0.225, wall_color.darkened(0.2)],          # socle de roche
+		[1.06, 0.12, 1.0, Color("#4a4c4b")],                    # bande d'acier
+		[1.07, 0.2, 1.45, Color("#e0a23a")],                    # bande de danger
+		[1.06, 0.12, 2.6, Color("#4a4c4b")],                    # bande d'acier
+		[1.14, 0.25, h - 0.125 + Z_LIFT, pillar_color.darkened(0.4)],    # chapiteau / cassure
+	]
+	for part in parts:
+		var y: float = part[2]
+		if y + part[1] * 0.5 > h + Z_LIFT + 0.01:
+			continue   # colonne tronquée : la bande serait dans le vide
+		var m := MeshInstance3D.new()
+		var b := BoxMesh.new()
+		b.size = Vector3(size.x * part[0], part[1], size.z * part[0])
+		m.mesh = b
+		m.position = Vector3(0.0, bottom + y, 0.0)
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = part[3]
+		m.material_override = mat
+		pillar.add_child(m)
+
+
+## Quatre lampes accrochées aux murs : deux au fond, une de chaque côté
+## (décalées vers le fond pour ne pas tomber dans l'embrasure des portes).
+func _build_lamps() -> void:
+	var hx: float = room_size.x * 0.5
+	var hz: float = room_size.y * 0.5
+	var y: float = wall_height * 0.7
+	var inset: float = 0.12
+	_add_lamp(Vector3(-hx * 0.5, y, -hz + inset), Vector3.BACK)
+	_add_lamp(Vector3(hx * 0.5, y, -hz + inset), Vector3.BACK)
+	_add_lamp(Vector3(-hx + inset, y, -hz * 0.4), Vector3.RIGHT)
+	_add_lamp(Vector3(hx - inset, y, -hz * 0.4), Vector3.LEFT)
+
+
+## Applique en acier + ampoule orange qui brille, et la lumière elle-même.
+## facing : direction vers l'intérieur de la salle.
+func _add_lamp(pos: Vector3, facing: Vector3) -> void:
+	var lamp := Node3D.new()
+	lamp.name = "Lamp"
+	lamp.position = pos
+	add_decor(lamp)   # masquée (et éteinte) tant que le voile couvre sa salle
+	if facing.length() > 0.01:
+		lamp.look_at_from_position(pos, pos + facing, Vector3.UP)
+
+	var bracket := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.22, 0.3, 0.16)
+	bracket.mesh = bm
+	bracket.position = Vector3(0.0, 0.0, -0.08)
+	var steel := StandardMaterial3D.new()
+	steel.albedo_color = Color("#4a4c4b")
+	bracket.material_override = steel
+	lamp.add_child(bracket)
+
+	var bulb := MeshInstance3D.new()
+	var sm := BoxMesh.new()
+	sm.size = Vector3(0.16, 0.18, 0.12)
+	bulb.mesh = sm
+	bulb.position = Vector3(0.0, -0.02, -0.2)
+	var glow := StandardMaterial3D.new()
+	glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glow.albedo_color = LAMP_COLOR
+	bulb.material_override = glow
+	bulb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	lamp.add_child(bulb)
+
+	var light := OmniLight3D.new()
+	light.light_color = LAMP_COLOR
+	light.light_energy = LAMP_ENERGY
+	light.omni_range = LAMP_RANGE
+	light.omni_attenuation = LAMP_FALLOFF
+	light.shadow_enabled = false   # beaucoup de lampes : on garde l'ombre au soleil
+	# Écartée du mur : sinon le mur juste sous la lampe brûle
+	light.position = Vector3(0.0, 0.2, -1.3)
+	lamp.add_child(light)
+
+
+## Ajoute un élément de décor à la salle et au voile : il reste caché tant
+## que sa partie de la salle est voilée.
+func add_decor(node: Node3D) -> void:
+	add_child(node)
+	_pieces.append(node)
 
 
 func _build_veil() -> void:
@@ -216,19 +394,26 @@ func _build_veil() -> void:
 ## la caméra puisse l'estomper. MeshInstance3D plutôt que CSG : il y a
 ## beaucoup de tronçons, et un CSG recalcule son maillage à la création.
 ## veiled : le voile masque ce morceau (tout sauf le sol).
-func _add_box(n: String, size: Vector3, pos: Vector3, color: Color, veiled: bool = true) -> void:
-	var box := MeshInstance3D.new()
-	box.name = n
-	var mesh := BoxMesh.new()
-	mesh.size = size
-	box.mesh = mesh
-	box.position = pos
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	box.material_override = mat
-	add_child(box)
-	if veiled:
-		_pieces.append(box)
+## visual_h : hauteur visible, posée sur le sol (-1 = celle de la collision,
+## 0 = aucun visuel, collision seule). Renvoie le visuel (null si aucun).
+func _add_box(n: String, size: Vector3, pos: Vector3, color: Color, veiled: bool = true, visual_h: float = -1.0) -> MeshInstance3D:
+	var box: MeshInstance3D = null
+	if visual_h != 0.0:
+		box = MeshInstance3D.new()
+		box.name = n
+		var mesh := BoxMesh.new()
+		mesh.size = size
+		box.position = pos
+		if visual_h > 0.0:
+			mesh.size.y = visual_h
+			box.position.y = pos.y - size.y * 0.5 + visual_h * 0.5
+		box.mesh = mesh
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = color
+		box.material_override = mat
+		add_child(box)
+		if veiled:
+			_pieces.append(box)
 
 	var body := StaticBody3D.new()
 	body.name = n + "Collision"
@@ -240,6 +425,7 @@ func _add_box(n: String, size: Vector3, pos: Vector3, color: Color, veiled: bool
 	col.shape = shape
 	body.add_child(col)
 	add_child(body)
+	return box
 
 
 # ---------------------------------------------------------------- VOILE

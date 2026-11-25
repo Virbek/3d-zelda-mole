@@ -27,16 +27,24 @@ signal died
 @export var flee_range: float = 5.5    ## trop près : il fuit
 @export var keep_max: float = 9.0      ## trop loin : il avance
 @export var strafe_speed: float = 2.4
-@export var run_speed: float = 4.6     ## vitesse de fuite (le joueur reste plus rapide)
+@export var run_speed: float = 3.2     ## vitesse de fuite à distance (le joueur reste bien plus rapide)
+## Au contact, il décroche mal : sa fuite tombe à cette part de run_speed,
+## pour que le joueur puisse enchaîner quelques coups avant qu'il s'éloigne.
+@export var close_flee_factor: float = 0.45
+@export var close_range: float = 2.2
 @export var panic_range: float = 3.2   ## si le joueur arrive à cette distance pendant la visée, il abandonne et fuit
 @export var wall_probe: float = 1.6    ## distance de détection des murs dans la direction de fuite
 
 @export_group("Tir")
 @export var aim_time: float = 1.0      ## télégraphe : c'est lui qui rend le tir esquivable
+## Tir à bout portant : collé au joueur, il tire quand même, avec une visée
+## plus courte (part de aim_time) qu'il n'annule pas.
+@export var close_aim_factor: float = 0.6
+@export var close_shot_range: float = 3.0
 @export var shoot_recover: float = 0.4
 @export var shoot_cooldown: float = 1.6
-@export var muzzle_offset: float = 0.9 ## distance de spawn devant lui
-@export var muzzle_height: float = 0.9
+@export var muzzle_offset: float = 0.75 ## distance de spawn devant lui (pointe du dard recourbé)
+@export var muzzle_height: float = 0.75
 @export var lead_factor: float = 0.25  ## anticipation du déplacement du joueur
 @export var projectile_speed: float = 6.5  ## écrase la vitesse du projectile
 ## Layers du décor qui bloquent la ligne de vue (murs, poteaux).
@@ -98,6 +106,11 @@ var _flash_tween: Tween
 
 var _stun_base_y: float = 0.0
 
+## Apparence du frelon-perceur (null si désactivée : on garde la capsule)
+@export var use_hornet_model: bool = true
+var _model: HornetModel = null
+var _close_shot: bool = false   ## la visée en cours est un tir à bout portant
+
 
 func _ready() -> void:
 	player = get_node_or_null(player_path)
@@ -113,6 +126,14 @@ func _ready() -> void:
 	_mat = mesh.get_active_material(0).duplicate()
 	mesh.material_override = _mat
 	_base_color = _mat.albedo_color
+
+	# Le frelon est rangé sous le mesh : il hérite de l'étirement de visée,
+	# du vacillement d'étourdissement et de l'écrasement à la mort.
+	if use_hornet_model:
+		_model = HornetModel.new()
+		mesh.add_child(_model)
+		_model.position.y = -_stun_base_y   # repère au sol
+		mesh.mesh = null
 
 	health_bar.set_ratio(1.0)
 	_strafe_dir = 1.0 if randf() > 0.5 else -1.0
@@ -158,6 +179,32 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 
 
+## Visuel uniquement : abdomen qui se recourbe pour viser, rayures qui
+## s'allument, ailes et flottement.
+func _process(delta: float) -> void:
+	if _model == null:
+		return
+	_model.set_tint(_mat.albedo_color, _base_color)
+	var curl: float = 0.0
+	var threat: float = 0.0
+	match state:
+		State.AIM:
+			curl = clampf(_t / maxf(_aim_duration() * 0.7, 0.01), 0.0, 1.0)
+			threat = clampf(_t / maxf(_aim_duration(), 0.01), 0.0, 1.0)
+		State.SHOOT:
+			curl = 1.0
+			threat = 1.0
+		State.RECOVER:
+			curl = 1.0 - clampf(_t / maxf(shoot_recover, 0.01), 0.0, 1.0)
+	_model.set_curl(curl)
+	_model.set_threat(threat)
+	_model.fly(Vector2(velocity.x, velocity.z).length(), delta)
+
+
+func _aim_duration() -> float:
+	return aim_time * (close_aim_factor if _close_shot else 1.0)
+
+
 func _set_state(next: State) -> void:
 	state = next
 	_t = 0.0
@@ -182,6 +229,14 @@ func _reposition(delta: float) -> void:
 	# En bonne fourchette, rechargé et avec une ligne de vue dégagée : il vise.
 	# Sinon il continue de tourner autour pour trouver un angle.
 	if d >= flee_range and d <= keep_max and _cooldown <= 0.0 and _has_line_of_sight():
+		_close_shot = false
+		_set_state(State.AIM)
+		_start_aim()
+		return
+
+	# Le joueur lui colle aux ailes : plutôt que de seulement fuir, il riposte
+	if d <= close_shot_range and _cooldown <= 0.0 and _has_line_of_sight():
+		_close_shot = true
 		_set_state(State.AIM)
 		_start_aim()
 		return
@@ -192,7 +247,9 @@ func _reposition(delta: float) -> void:
 
 	if d < flee_range:
 		move = _flee_direction(-to_player)       # fuit en évitant les murs
-		spd = run_speed
+		# Lent au contact, il accélère à mesure qu'il prend de la distance
+		var k: float = clampf((d - close_range) / maxf(flee_range - close_range, 0.01), 0.0, 1.0)
+		spd = run_speed * lerpf(close_flee_factor, 1.0, k)
 	elif d > keep_max:
 		move = to_player                         # approche
 	else:
@@ -246,16 +303,17 @@ func _aim(delta: float) -> void:
 	_face(_dir_to_player(), delta)
 
 	# Le joueur a foncé sur lui : il abandonne son tir et prend la fuite
-	if _distance_to_player() < panic_range:
+	# (sauf s'il a justement armé un tir à bout portant)
+	if not _close_shot and _distance_to_player() < panic_range:
 		_cancel_aim()
 		_cooldown = maxf(_cooldown, 0.8)
 		return
 
 	# Il se ramasse puis s'étire, comme une arbalète qu'on bande
-	var k: float = _t / aim_time
+	var k: float = _t / _aim_duration()
 	mesh.scale = _base_scale * Vector3(1.0 - k * 0.15, 1.0 + k * 0.3, 1.0 - k * 0.15)
 
-	if _t >= aim_time:
+	if _t >= _aim_duration():
 		# Le joueur s'est caché derrière un obstacle : tir annulé
 		if not _has_line_of_sight():
 			_cancel_aim()
@@ -383,8 +441,8 @@ func _start_aim() -> void:
 	if _flash_tween != null and _flash_tween.is_running():
 		_flash_tween.kill()
 	_flash_tween = create_tween()
-	_flash_tween.tween_property(_mat, "albedo_color", aim_color, aim_time * 0.8)
-	_flash_tween.tween_property(_mat, "albedo_color", _base_color, aim_time * 0.2)
+	_flash_tween.tween_property(_mat, "albedo_color", aim_color, _aim_duration() * 0.8)
+	_flash_tween.tween_property(_mat, "albedo_color", _base_color, _aim_duration() * 0.2)
 
 
 # ---------------------------------------------------------------- DÉGÂTS

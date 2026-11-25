@@ -102,9 +102,17 @@ signal room_changed(cell: Vector2i)
 @export var boss_scene: PackedScene
 
 @export_group("Couleurs")
-@export var floor_color := Color(0.55, 0.52, 0.48)
-@export var wall_color := Color(0.38, 0.36, 0.34)
-@export var pillar_color := Color(0.45, 0.42, 0.40)
+## Raffinerie ensevelie : terre et sable tassés au sol, roche brune aux murs,
+## poutres d'acier rouillé pour les piliers.
+@export var floor_color := Color("#7a5c3c")
+@export var wall_color := Color("#4a3628")
+@export var pillar_color := Color("#6e3a1e")
+
+@export_group("Ambiance")
+## Lumière, pénombre et poussière souterraines (null = scène telle quelle)
+@export var ambiance: UndergroundAmbiance = UndergroundAmbiance.new()
+@export var lamps_per_room: bool = true
+@export var decor_per_room: bool = true   ## dunes, poutres, tuyaux, bidons, poussière
 
 const DOOR_OPEN := 1
 const DOOR_LOCKED := 2
@@ -139,10 +147,32 @@ func _ready() -> void:
 		return
 
 	keys_changed.connect(_sync_door_keys)
+	_apply_ambiance()
 	_build()
 	keys_changed.emit(keys)
 	# Différé : le joueur a peut-être été replacé au checkpoint dans son _ready
 	_enter_first_room.call_deferred()
+
+
+## Cherche le WorldEnvironment et la lumière directionnelle voisins du
+## donjon et leur applique l'ambiance souterraine.
+func _apply_ambiance() -> void:
+	if ambiance == null:
+		return
+	var env: Environment = null
+	var sun: DirectionalLight3D = null
+	var parent: Node = get_parent()
+	if parent == null:
+		return
+	for c in parent.get_children():
+		if c is WorldEnvironment and env == null:
+			var we: WorldEnvironment = c
+			if we.environment == null:
+				we.environment = Environment.new()
+			env = we.environment
+		elif c is DirectionalLight3D and sun == null:
+			sun = c
+	ambiance.apply_to(env, sun)
 
 
 # ---------------------------------------------------------------- CONSTRUCTION
@@ -306,6 +336,8 @@ func _build() -> void:
 		room.floor_color = floor_color
 		room.wall_color = wall_color
 		room.pillar_color = pillar_color
+		room.with_lamps = lamps_per_room
+		room.with_decor = decor_per_room
 		room.position = _cell_to_local(cell)
 		add_child(room)
 		room.build()
@@ -323,6 +355,7 @@ func _build() -> void:
 		door.axis_x = a.y == b.y
 		door.width = door_width
 		door.height = door_height
+		door.ledge_height = (_rooms.values()[0] as DungeonRoom).ledge_height if not _rooms.is_empty() else 0.8
 		door.depth = wall_thickness
 		door.state = DungeonDoor.DoorState.LOCKED if l[2] else DungeonDoor.DoorState.OPEN
 		door.position = (_cell_to_local(a) + _cell_to_local(b)) * 0.5

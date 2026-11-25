@@ -248,6 +248,8 @@ var _gauntlet_r: Gauntlet = null
 @export var boot_toe_lift: float = 18.0     ## bascule de la pointe pendant un pas (degrés)
 @export var boot_turn_limit: float = 70.0   ## au-delà, un pied posé pivote sur place
 @export var use_outfit: bool = true         ## foulard, ceinture et petit sac de la taupe
+@export var use_tethers: bool = true        ## filaments électriques corps ↔ membres
+var _tethers: EnergyTethers = null
 ## Par pied : [botte, Foot, cap actuel, cap au début du pas, était en l'air]
 var _boots: Array = []
 ## [gantelet, côté, direction actuelle des jointures, roulis actuel en degrés]
@@ -307,6 +309,8 @@ func _ready() -> void:
 		_attach_boots()
 	if use_outfit:
 		body.add_child(MoleOutfit.create(gauntlet_outline))
+	if use_tethers:
+		_attach_tethers()
 
 
 func _physics_process(delta: float) -> void:
@@ -336,6 +340,8 @@ func _physics_process(delta: float) -> void:
 ## rig et tombe en chute libre jusqu'au sol détecté sous lui.
 func ragdoll() -> void:
 	_ragdoll = true
+	if _tethers != null:
+		_tethers.visible = false   # les membres tombent chacun de leur côté
 	_ragdoll_vel.clear()
 	for n in [body, foot_l, foot_r, hand_l, hand_r]:
 		_ragdoll_vel[n] = Vector3.ZERO
@@ -686,6 +692,31 @@ func _clear_charge_glow() -> void:
 	_set_hand_r_overlay(null)
 	if _glow_base_scale != Vector3.ZERO:
 		m.scale = _glow_base_scale
+
+
+## Filaments électriques : épaules → poignets des gantelets, hanches →
+## chevilles des bottes (ou centre des mains / pieds sans équipement).
+## Points d'ancrage du corps exprimés dans le repère Body (avant -Z).
+func _attach_tethers() -> void:
+	_tethers = EnergyTethers.new()
+	_tethers.name = "Tethers"
+	add_child(_tethers)
+	for entry in _gauntlets:
+		var g: Node3D = entry[0]
+		var side: float = entry[1]
+		var shoulder := Vector3(0.3 * side, -0.3, 0.0)
+		_tethers.add_link(
+			func() -> Vector3: return body.global_transform * shoulder,
+			func() -> Vector3: return g.global_transform * Vector3(0.0, 0.0, 0.2)   # manchette
+		)
+	for entry in _boots:
+		var b: Node3D = entry[0]
+		var f: Foot = entry[1]
+		var hip := Vector3(0.18 * f.side, -0.85, 0.0)
+		_tethers.add_link(
+			func() -> Vector3: return body.global_transform * hip,
+			func() -> Vector3: return b.global_transform * Vector3(0.0, 0.28, 0.06)   # cheville
+		)
 
 
 ## Pose une botte sur chaque pied, rangée sous la sphère d'origine (dont on

@@ -108,6 +108,9 @@ var _tele_tween: Tween
 
 ## Apparence du lucane-cisaille (null si désactivée : on garde la capsule)
 @export var use_beetle_model: bool = true
+## Taille de l'ennemi (modèle, collisions, zones de coup). Les distances
+## d'approche et d'attaque suivent, pour qu'il touche toujours à portée.
+@export var size_scale: float = 0.75
 var _model: StagBeetleModel = null
 
 
@@ -119,6 +122,7 @@ func _ready() -> void:
 		return
 	add_to_group("enemy")
 	health = max_health
+	_apply_size()
 	_base_scale = mesh.scale
 	_hit_react = HitReaction.attach(mesh)
 	_base_mesh_y = mesh.position.y
@@ -172,6 +176,20 @@ func _physics_process(delta: float) -> void:
 
 	_apply_gravity(delta)
 	move_and_slide()
+
+
+## Réduit tout l'ennemi d'un coup (échelle uniforme : collisions comprises),
+## mais garde les barres de vie et d'étourdissement à leur taille lisible.
+func _apply_size() -> void:
+	if is_equal_approx(size_scale, 1.0):
+		return
+	scale = Vector3.ONE * size_scale
+	for bar in [health_bar, stun_bar]:
+		if bar != null:
+			bar.scale /= size_scale
+	stop_distance *= size_scale
+	attack_range *= lerpf(1.0, size_scale, 0.6)
+	circle_distance *= lerpf(1.0, size_scale, 0.5)
 
 
 ## Visuel uniquement : pinces, pattes, yeux et teinte du lucane.

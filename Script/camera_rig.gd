@@ -263,15 +263,26 @@ func _visual_mat(visual: Node3D) -> StandardMaterial3D:
 	return null
 
 
+## Le visuel et ses enfants : un pilier détaillé (socle, bandes, chapiteau)
+## doit s'estomper d'un bloc, pas seulement son volume principal.
+func _visual_mats(visual: Node3D) -> Array[StandardMaterial3D]:
+	var out: Array[StandardMaterial3D] = []
+	var m: StandardMaterial3D = _visual_mat(visual)
+	if m != null:
+		out.append(m)
+	for c in visual.get_children():
+		if c is GeometryInstance3D:
+			var cm := (c as GeometryInstance3D).material_override as StandardMaterial3D
+			if cm != null:
+				out.append(cm)
+	return out
+
+
 func _set_transparent(visual: Node3D, on: bool) -> void:
-	var mat: StandardMaterial3D = _visual_mat(visual)
-	if mat == null:
-		return
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA if on else BaseMaterial3D.TRANSPARENCY_DISABLED
+	for mat in _visual_mats(visual):
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA if on else BaseMaterial3D.TRANSPARENCY_DISABLED
 
 
 func _apply_alpha(visual: Node3D, a: float) -> void:
-	var mat: StandardMaterial3D = _visual_mat(visual)
-	if mat == null:
-		return
-	mat.albedo_color.a = a
+	for mat in _visual_mats(visual):
+		mat.albedo_color.a = a

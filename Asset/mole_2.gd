@@ -7,7 +7,9 @@ extends Node3D
 
 @export var toon_shader: Shader
 @export var outline_shader: Shader
-@export var outline_width: float = 0.012
+## Épaisseur du contour noir. (Renommé depuis outline_width : la scène
+## forçait l'ancien réglage à 0, ce qui supprimait le contour.)
+@export var outline_thickness: float = 0.01
 @export var outline_skip: Array[String] = ["plane", "plane_1", "plane_2", "plane_3", "plane_4"]  ## pièces fines : pas de contour dessus
 ## Pièces du modèle masquées au lancement, remplacées par la tenue construite
 ## par script (Script/player/mole_outfit.gd) :
@@ -44,6 +46,8 @@ func _apply_toon(mesh_instance: MeshInstance3D, surface: int) -> void:
 	var toon_mat := ShaderMaterial.new()
 	toon_mat.shader = toon_shader
 	toon_mat.set_shader_parameter("use_texture", tex != null)
+	# Même teinte d'ombre que les gantelets, bottes et tenue (brun chaud)
+	toon_mat.set_shader_parameter("shadow_color", Color(0.28, 0.18, 0.14))
 	if tex != null:
 		toon_mat.set_shader_parameter("albedo_texture", tex)
 		toon_mat.set_shader_parameter("albedo_color", Color(1.0, 1.0, 1.0, 1.0))
@@ -54,7 +58,7 @@ func _apply_toon(mesh_instance: MeshInstance3D, surface: int) -> void:
 	if not outline_skip.has(mesh_instance.name):
 		var outline_mat := ShaderMaterial.new()
 		outline_mat.shader = outline_shader
-		outline_mat.set_shader_parameter("outline_width", outline_width)
+		outline_mat.set_shader_parameter("outline_width", outline_thickness)
 		toon_mat.next_pass = outline_mat
 
 	mesh_instance.set_surface_override_material(surface, toon_mat)

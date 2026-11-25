@@ -32,20 +32,27 @@ var bars_color := Color(0.22, 0.22, 0.25)
 
 ## Marquage au sol de chaque côté de la porte : on la repère même quand le
 ## mur qui la porte est vu de profil. Sa couleur dit son état.
-var mark_length: float = 1.6          ## longueur dans chaque salle
-var mark_open_color := Color(0.95, 0.78, 0.35)
-var mark_locked_color := Color(0.85, 0.25, 0.2)
-var mark_closed_color := Color(0.45, 0.45, 0.5)
+## Lumière qui déborde par la porte, au sol de chaque salle
+var spill_length: float = 3.2         ## portée dans chaque salle
+var spill_open_color := Color(1.0, 0.7, 0.38)
+var spill_locked_color := Color(0.95, 0.22, 0.12)
+var spill_closed_color := Color(0.85, 0.2, 0.12)
+## Hauteur visible du battant côté salle où la porte est dans le muret du
+## bas (vue en coupe) ; la collision garde toute la hauteur.
+var ledge_height: float = 0.8
 
 var _blocker: Node3D
-var _plates: Array[MeshInstance3D] = []
+var _plates: Array[Node3D] = []
 ## Moitiés du battant, côté cell_a et côté cell_b (masquées par le voile de leur salle).
 var half_a: Node3D
 var half_b: Node3D
 var _mat: StandardMaterial3D
 var _col: CollisionShape3D
 var _trigger: Area3D
-var _mark_mat: StandardMaterial3D
+var _spill_mat: StandardMaterial3D
+var _door_light: OmniLight3D
+var _panels: Array[Node3D] = []      ## battant blindé (porte verrouillée)
+var _bars: Array[Node3D] = []        ## grille (porte fermée pendant un combat)
 var _tween: Tween
 
 ## Tenu à jour par le Dungeon : change le texte affiché devant la porte.
@@ -75,28 +82,29 @@ func build() -> void:
 	# Le battant est coupé en deux moitiés, une par salle : chaque salle masque
 	# la sienne sous son voile. D'un seul bloc, la moitié côté salle voisine
 	# dépasserait du voile (qui n'est qu'une dalle au sol).
-	_mat = StandardMaterial3D.new()
-	var gold := StandardMaterial3D.new()
-	gold.albedo_color = lock_color
-	gold.metallic = 0.6
+	_mat = StandardMaterial3D.new()   # conservé pour compatibilité (non affiché)
 	var dir := Vector3(cell_b.x - cell_a.x, 0.0, cell_b.y - cell_a.y)
-	half_a = _build_half("HalfA", -dir, gold)
-	half_b = _build_half("HalfB", dir, gold)
+	half_a = _build_half("HalfA", -dir, _half_height(-dir))
+	half_b = _build_half("HalfB", dir, _half_height(dir))
 
-	# Le marquage traverse la porte et déborde dans les deux salles. Il reste
-	# sous la dalle du voile : la moitié côté salle voilée est donc cachée.
-	_mark_mat = StandardMaterial3D.new()
-	_mark_mat.emission_enabled = true
-	_mark_mat.emission_energy_multiplier = 0.6
-	var mark := MeshInstance3D.new()
-	mark.name = "FloorMark"
-	var mb := BoxMesh.new()
-	mb.size = _oriented(Vector3(width * 0.9, 0.03, depth + mark_length * 2.0))
-	mark.mesh = mb
-	mark.position.y = 0.015
-	mark.material_override = _mark_mat
-	mark.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mark)
+	# Pas de marquage peint : la lumière de l'autre salle déborde par la porte
+	_spill_mat = StandardMaterial3D.new()
+	_spill_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_spill_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_spill_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	_spill_mat.albedo_texture = _spill_texture()
+	# Sans ça, le bord opposé du plan reprend le haut du dégradé (ligne lumineuse)
+	_spill_mat.texture_repeat = false
+	for side: Vector3 in [-dir, dir]:
+		_build_spill(side)
+
+	# Petite lumière dans l'embrasure : elle éclaire l'encadrement et le battant
+	_door_light = OmniLight3D.new()
+	_door_light.omni_range = 3.5
+	_door_light.light_energy = 0.6
+	_door_light.shadow_enabled = false
+	_door_light.position.y = height * 0.6
+	add_child(_door_light)
 
 	_trigger = Area3D.new()
 	_trigger.name = "Trigger"
@@ -119,31 +127,123 @@ func build() -> void:
 	set_state_instant(state)
 
 
-## Une moitié de battant, décalée d'un quart d'épaisseur vers side, avec sa
-## plaque de serrure sur la face visible.
-func _build_half(n: String, side: Vector3, gold: Material) -> Node3D:
+## Une moitié de porte, décalée d'un quart d'épaisseur vers side (la salle
+## qui la voit). Deux apparences superposées, montrées selon l'état :
+##   - battant blindé rouillé (verrouillée) : nervures d'acier, rivets, bande
+##     de danger, volant de verrou ;
+##   - grille de barreaux (fermée pendant un combat).
+## h : hauteur visible (plus basse dans un muret, vue en coupe).
+func _build_half(n: String, side: Vector3, h: float) -> Node3D:
 	var half := Node3D.new()
 	half.name = n
 	half.position = side * depth * 0.25
 	_blocker.add_child(half)
+	var face: Vector3 = side * depth * 0.25   # face visible, côté salle
+	var t: float = depth * 0.5                # épaisseur d'une moitié
 
+	# --- Battant blindé ---
+	var panel := Node3D.new()
+	half.add_child(panel)
+	_panels.append(panel)
+	_box(panel, Vector3(width, h, t), Vector3(0.0, h * 0.5, 0.0), ToonBuilder.RUST_DARK)
+	for y: float in [0.25, 0.55, 0.85]:
+		if y * h > h - 0.1:
+			continue
+		_box(panel, Vector3(width + 0.04, 0.12, t + 0.06), Vector3(0.0, y * h, 0.0), ToonBuilder.STEEL_DARK)
+	# Rivets sur la face visible
+	for x: float in [-0.42, 0.42]:
+		for y: float in [0.25, 0.55, 0.85]:
+			if y * h > h - 0.1:
+				continue
+			_box(panel, Vector3(0.07, 0.07, 0.04), Vector3(x * width, y * h, 0.0) + face + side * 0.02, ToonBuilder.STEEL_LIGHT)
+	# Bande de danger en bas
+	var stripes: int = 6
+	var sw: float = width / float(stripes)
+	for i in stripes:
+		var c: Color = ToonBuilder.HAZARD if i % 2 == 0 else Color("#1a130d")
+		_box(panel, Vector3(sw, 0.18, 0.03), Vector3(-width * 0.5 + sw * (float(i) + 0.5), 0.12, 0.0) + face + side * 0.015, c)
+	# Verrou : volant d'acier sur une plaque jaune (seulement si la hauteur le permet)
+	if h > 1.4:
+		var lock := Node3D.new()
+		lock.position = Vector3(0.0, h * 0.55, 0.0) + face + side * 0.03
+		panel.add_child(lock)
+		_plates.append(lock)
+		_box(lock, Vector3(0.55, 0.55, 0.05), Vector3.ZERO, ToonBuilder.HAZARD)
+		var wheel := MeshInstance3D.new()
+		wheel.mesh = ToonBuilder.cylinder(0.2, 0.06, 10)
+		wheel.material_override = ToonBuilder.toon_material(ToonBuilder.STEEL, 0.008)
+		wheel.position = side * 0.04
+		wheel.rotation = Vector3(PI * 0.5, 0.0, 0.0) if not axis_x else Vector3(0.0, 0.0, PI * 0.5)
+		lock.add_child(wheel)
+
+	# --- Grille de barreaux ---
+	var bars := Node3D.new()
+	half.add_child(bars)
+	_bars.append(bars)
+	var count: int = 6
+	for i in count:
+		var x: float = -width * 0.5 + width * (float(i) + 0.5) / float(count)
+		_box(bars, Vector3(0.1, h, 0.1), Vector3(x, h * 0.5, 0.0), ToonBuilder.STEEL_DARK)
+	_box(bars, Vector3(width, 0.12, 0.14), Vector3(0.0, h * 0.35, 0.0), ToonBuilder.RUST)
+	_box(bars, Vector3(width, 0.12, 0.14), Vector3(0.0, h - 0.1, 0.0), ToonBuilder.RUST)
+	return half
+
+
+## Hauteur visible de la moitié tournée vers side : basse si, pour cette
+## salle, la porte est dans le muret du bas (la salle est au nord, +Z vers la
+## caméra), pleine sinon.
+func _half_height(side: Vector3) -> float:
+	if not axis_x and side.z < -0.5:
+		# side pointe vers la salle nord : pour elle, la porte est au sud
+		return minf(ledge_height, height)
+	return height
+
+
+## Une boîte orientée dans le repère de la porte (largeur / hauteur / épaisseur).
+func _box(parent: Node3D, size_whd: Vector3, pos_local: Vector3, color: Color) -> MeshInstance3D:
 	var m := MeshInstance3D.new()
 	var b := BoxMesh.new()
-	b.size = _oriented(Vector3(width, height, depth * 0.5))
+	b.size = _oriented(size_whd)
 	m.mesh = b
-	m.position.y = height * 0.5
-	m.material_override = _mat
-	half.add_child(m)
+	# pos_local : x le long de la largeur, z dans l'épaisseur
+	m.position = _oriented_pos(pos_local)
+	m.material_override = ToonBuilder.toon_material(color, 0.008)
+	parent.add_child(m)
+	return m
 
-	var plate := MeshInstance3D.new()
-	var pb := BoxMesh.new()
-	pb.size = _oriented(Vector3(0.5, 0.6, 0.06))
-	plate.mesh = pb
-	plate.position = Vector3(0.0, height * 0.5, 0.0) + side * depth * 0.25
-	plate.material_override = gold
-	half.add_child(plate)
-	_plates.append(plate)
-	return half
+
+func _oriented_pos(v: Vector3) -> Vector3:
+	return Vector3(v.z, v.y, v.x) if axis_x else v
+
+
+## Éventail de lumière au sol, dans la salle tournée vers side.
+func _build_spill(side: Vector3) -> void:
+	var m := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	# Le dégradé s'éteint à mi-longueur du plan : l'éventail visible fait
+	# spill_length de profondeur, et aucun bord du plan n'est éclairé.
+	pm.size = Vector2(width * 2.6, spill_length * 2.0)
+	m.mesh = pm
+	m.position = side * (depth * 0.5 + spill_length) + Vector3(0.0, 0.02, 0.0)
+	# La texture va de la porte (haut, opaque) vers la salle (bas, transparent)
+	m.rotation.y = atan2(side.x, side.z)
+	m.material_override = _spill_mat
+	m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(m)
+
+
+func _spill_texture() -> GradientTexture2D:
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, 0.25, 0.5])
+	g.colors = PackedColorArray([Color(1, 1, 1, 0.45), Color(1, 1, 1, 0.18), Color(1, 1, 1, 0.0)])
+	var tex := GradientTexture2D.new()
+	tex.gradient = g
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(0.5, 0.0)
+	tex.fill_to = Vector2(0.5, 1.0)
+	tex.width = 64
+	tex.height = 64
+	return tex
 
 
 ## Une taille exprimée « largeur / hauteur / épaisseur » vers le repère monde.
@@ -224,22 +324,36 @@ func _on_opened() -> void:
 
 
 func _apply_look() -> void:
-	var mark: Color = mark_open_color
+	var c: Color = spill_open_color
+	var energy: float = 0.6
 	match state:
 		DoorState.LOCKED:
-			_mat.albedo_color = locked_color
+			_show(_panels, true)
+			_show(_bars, false)
 			_set_plates(true)
-			mark = mark_locked_color
+			c = spill_locked_color
+			energy = 0.35
 		DoorState.CLOSED:
-			_mat.albedo_color = bars_color
+			_show(_panels, false)
+			_show(_bars, true)
 			_set_plates(false)
-			mark = mark_closed_color
+			c = spill_closed_color
+			energy = 0.35
 		_:
-			_mat.albedo_color = bars_color
+			_show(_panels, false)
+			_show(_bars, true)
 			_set_plates(false)
-	if _mark_mat != null:
-		_mark_mat.albedo_color = mark
-		_mark_mat.emission = mark
+	if _spill_mat != null:
+		# Verrouillée : lueur rouge plus faible que la lumière chaude d'un passage ouvert
+		_spill_mat.albedo_color = Color(c, 0.85 if state == DoorState.OPEN else 0.6)
+	if _door_light != null:
+		_door_light.light_color = c
+		_door_light.light_energy = energy
+
+
+func _show(nodes: Array[Node3D], on: bool) -> void:
+	for n in nodes:
+		n.visible = on
 
 
 func _set_plates(on: bool) -> void:

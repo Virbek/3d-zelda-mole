@@ -18,6 +18,8 @@ extends Area3D
 @export_flags_3d_physics var world_mask: int = 1
 ## Distance au torse en dessous de laquelle une esquive "consomme" le tir.
 @export var dodge_radius: float = 1.1
+## Dard d'acier chauffé au lieu de la boule : allongé dans le sens du tir
+@export var needle: bool = true
 
 ## Renseignés par le tireur au moment du spawn
 var direction: Vector3 = Vector3.FORWARD
@@ -29,6 +31,7 @@ var _dead: bool = false
 ## même si l'invincibilité se termine alors qu'il chevauche encore le torse.
 var _dodged: bool = false
 var _player_hurt: Area3D = null
+var _aimed: bool = false   ## le dard est orienté une fois la direction connue
 
 @onready var mesh: MeshInstance3D = $MeshInstance3D
 
@@ -39,6 +42,25 @@ func _ready() -> void:
 	for n in get_tree().get_nodes_in_group("player_hurt"):
 		_player_hurt = n as Area3D
 		break
+	if needle:
+		_make_needle()
+
+
+## Remplace la boule par un dard : cône d'acier, pointe chauffée à blanc
+## (non éclairée, lisible dans la pénombre). Pointe vers -Z local.
+func _make_needle() -> void:
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.0
+	cone.bottom_radius = 0.07
+	cone.height = 0.55
+	cone.radial_segments = 6
+	cone.rings = 1
+	mesh.mesh = cone
+	mesh.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1.0, 0.62, 0.28)
+	mesh.material_override = mat
 
 
 func _physics_process(delta: float) -> void:
@@ -62,7 +84,14 @@ func _physics_process(delta: float) -> void:
 		return
 
 	global_position = to
-	mesh.rotate_y(spin_speed * delta)
+	if needle:
+		# La direction n'est connue qu'après le _ready : on oriente au 1er pas
+		if not _aimed and direction.length() > 0.01:
+			look_at(global_position + direction, Vector3.UP)
+			_aimed = true
+		mesh.rotate_object_local(Vector3.UP, spin_speed * delta)   # vrille sur son axe
+	else:
+		mesh.rotate_y(spin_speed * delta)
 	_check_dodge()
 
 
