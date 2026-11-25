@@ -296,7 +296,7 @@ func play_unlock(player_pos: Vector3) -> void:
 		side = 1.0
 	var face: Vector3 = global_position + Vector3.UP * height * 0.5 + n * side * (depth * 0.5 + 0.08)
 
-	var key: Node3D = ItemData.build_key_model(lock_color)
+	var key: Node3D = ItemData.build_key_model(ItemData.KEY_COLOR)
 	add_child(key)
 	key.top_level = true
 	key.global_position = face + n * side * 0.7

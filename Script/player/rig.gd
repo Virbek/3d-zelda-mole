@@ -63,6 +63,9 @@ extends Node3D
 @export var magnet_ramp_start: float = 0.35  ## avant ce point du coup (0-1) : aucune correction, l'arc est pur
 @export var magnet_ramp_end: float = 0.85    ## à partir de ce point : correction à pleine puissance
 @export_flags_3d_physics var magnet_mask: int = 2
+## Distance horizontale max entre le buste et un poing du combo, même
+## attiré par une cible lointaine : au-delà, le bras a l'air de s'arracher.
+@export var max_fist_distance: float = 2.2
 
 @export_group("Ressenti des pas")
 @export var bob_height: float = 0.07        ## montée du corps pendant un pas
@@ -199,6 +202,9 @@ var _recover_side: float = 0.0   ## 0 = les deux mains récupèrent
 ## Cible du magnétisme. Non typée : un nœud libéré ne peut pas être assigné
 ## à une variable typée Node3D, ce qui ferait planter avant qu'on puisse tester.
 var _magnet_target = null
+## Cible imposée par Combat (coup lourd sur un ennemi étourdi) : remplace
+## la recherche habituelle tant qu'elle est définie.
+var _forced_magnet = null
 
 ## Charge : mise en place, puis cercle vertical devant le corps
 var _charging: bool = false
@@ -217,6 +223,35 @@ var _punch_hit: bool = false       ## le poing a buté : il ne repart pas en ava
 
 ## Lueur de charge pleine (voir charge_full_flash)
 @export var charge_glow_hold_alpha: float = 0.35
+
+@export_group("Gantelets")
+@export var use_gauntlets: bool = true      ## remplace les sphères des mains par les gantelets mécaniques
+@export var gauntlet_outline: float = 0.008 ## épaisseur du contour noir (0 = aucun)
+@export var gauntlet_scale: float = 1.25    ## taille : un peu gros, pour rester lisible vu de haut
+## Rotation sur l'axe du bras : 90 = poing vertical (jointures à la verticale,
+## pouce en haut), 0 = poing à plat.
+@export var gauntlet_roll: float = 90.0
+## Vitesse à laquelle les jointures se tournent vers la cible quand un coup part
+@export var gauntlet_aim_speed: float = 45.0
+## Vitesse de retour vers le sol une fois le coup fini (plus douce)
+@export var gauntlet_rest_speed: float = 10.0
+## Vitesse de déplacement à partir de laquelle les poings sont à l'horizontale
+## (en dessous, ils se relèvent progressivement depuis la position « bras ballants »)
+@export var gauntlet_move_full_speed: float = 4.0
+## Rotation sur l'axe du bras pendant le déplacement : -90 = pouces vers le bas
+@export var gauntlet_move_roll: float = -90.0
+var _gauntlet_r: Gauntlet = null
+
+@export_group("Bottes")
+@export var use_boots: bool = true          ## remplace les sphères des pieds par des bottes mécaniques
+@export var boot_scale: float = 1.15
+@export var boot_toe_lift: float = 18.0     ## bascule de la pointe pendant un pas (degrés)
+@export var boot_turn_limit: float = 70.0   ## au-delà, un pied posé pivote sur place
+@export var use_outfit: bool = true         ## foulard, ceinture et petit sac de la taupe
+## Par pied : [botte, Foot, cap actuel, cap au début du pas, était en l'air]
+var _boots: Array = []
+## [gantelet, côté, direction actuelle des jointures, roulis actuel en degrés]
+var _gauntlets: Array = []
 var _glow_mat: StandardMaterial3D = null
 var _glow_tween: Tween = null
 var _glow_base_scale := Vector3.ZERO
@@ -266,6 +301,13 @@ func _ready() -> void:
 		h.node.global_position = h.pos
 		_hands.append(h)
 
+	if use_gauntlets:
+		_attach_gauntlets()
+	if use_boots:
+		_attach_boots()
+	if use_outfit:
+		body.add_child(MoleOutfit.create(gauntlet_outline))
+
 
 func _physics_process(delta: float) -> void:
 	if _ragdoll:
@@ -286,6 +328,8 @@ func _physics_process(delta: float) -> void:
 	_update_body(delta)
 	_update_charge_body()
 	_update_hands(delta)
+	_update_gauntlets(delta)
+	_update_boots(delta)
 
 
 ## Appelé par Player.gd à la mort. Chaque membre arrête d'être piloté par le
@@ -370,6 +414,9 @@ func _player_intent() -> Vector3:
 ## indispensable quand il n'y a pas de verrouillage.
 func _acquire_magnet() -> void:
 	_magnet_target = null
+	if _forced_magnet != null and is_instance_valid(_forced_magnet):
+		_magnet_target = _forced_magnet
+		return
 
 	var space := get_world_3d().direct_space_state
 	var shape := SphereShape3D.new()
@@ -437,7 +484,22 @@ func _magnetize(pos: Vector3, t: float) -> Vector3:
 	var ramp: float = clampf(
 		inverse_lerp(magnet_ramp_start, magnet_ramp_end, t), 0.0, 1.0
 	)
-	return pos.lerp(aim, magnet_strength * ramp)
+	return _clamp_to_body(pos.lerp(aim, magnet_strength * ramp))
+
+
+## Ramène une position de main à max_fist_distance du buste (à l'horizontale).
+func _clamp_to_body(pos: Vector3) -> Vector3:
+	var off := Vector3(pos.x - _body_pos.x, 0.0, pos.z - _body_pos.z)
+	var d: float = off.length()
+	if d <= max_fist_distance or d < 0.001:
+		return pos
+	off *= max_fist_distance / d
+	return Vector3(_body_pos.x + off.x, pos.y, _body_pos.z + off.z)
+
+
+## Combat impose la cible du prochain coup (null pour revenir à la normale).
+func set_forced_magnet(target) -> void:
+	_forced_magnet = target
 
 
 # ------------------------------------------------------- ATTRACTION UNIFIÉE
@@ -603,7 +665,7 @@ func charge_full_flash() -> void:
 		_glow_mat.albedo_color = Color(1.0, 1.0, 0.85, 0.0)
 	if _glow_base_scale == Vector3.ZERO:
 		_glow_base_scale = m.scale
-	m.material_overlay = _glow_mat
+	_set_hand_r_overlay(_glow_mat)
 
 	if _glow_tween != null and _glow_tween.is_running():
 		_glow_tween.kill()
@@ -621,9 +683,169 @@ func _clear_charge_glow() -> void:
 	var m := _hand_r_mesh()
 	if m == null:
 		return
-	m.material_overlay = null
+	_set_hand_r_overlay(null)
 	if _glow_base_scale != Vector3.ZERO:
 		m.scale = _glow_base_scale
+
+
+## Pose une botte sur chaque pied, rangée sous la sphère d'origine (dont on
+## retire juste le maillage), comme les gantelets.
+func _attach_boots() -> void:
+	for f in _feet:
+		var foot: Foot = f
+		var b := MechBoot.create(foot.side, gauntlet_outline)
+		var holder: Node3D = foot.node
+		for c in foot.node.get_children():
+			if c is MeshInstance3D:
+				holder = c
+				(c as MeshInstance3D).mesh = null
+				break
+		holder.add_child(b)
+		var sc: Vector3 = holder.scale
+		b.scale = Vector3(1.0 / maxf(sc.x, 0.001), 1.0 / maxf(sc.y, 0.001), 1.0 / maxf(sc.z, 0.001)) * boot_scale
+		# La sphère est centrée sur le point de contact : la semelle s'y pose
+		b.position = Vector3.ZERO
+		_boots.append([b, foot, player.rotation.y, player.rotation.y, false])
+
+
+## Un pied posé garde son cap (il ne glisse pas au sol). Pendant un pas, la
+## botte pivote vers la direction du joueur, relève la pointe au décollage et
+## la rabat à l'atterrissage.
+func _update_boots(delta: float) -> void:
+	var target_yaw: float = player.rotation.y
+	for entry in _boots:
+		var b: MechBoot = entry[0]
+		var foot: Foot = entry[1]
+		var yaw: float = entry[2]
+		var pitch: float = 0.0
+
+		if foot.stepping:
+			if not entry[4]:
+				entry[3] = yaw          # début du pas : on mémorise le cap de départ
+			var k: float = smoothstep(0.0, 1.0, foot.t)
+			yaw = lerp_angle(entry[3], target_yaw, k)
+			pitch = sin(foot.t * TAU) * deg_to_rad(boot_toe_lift)
+		elif absf(angle_difference(yaw, target_yaw)) > deg_to_rad(boot_turn_limit):
+			# Le joueur a tourné sans faire de pas : le pied pivote sur place
+			yaw = lerp_angle(yaw, target_yaw, 1.0 - exp(-10.0 * delta))
+
+		entry[2] = yaw
+		entry[4] = foot.stepping
+		b.rotation = Vector3(pitch, yaw, 0.0)
+
+
+## Oriente les jointures : vers le sol au repos (bras ballants), vers l'ennemi
+## pendant un coup, pour que ce soient bien les doigts qui frappent.
+func _update_gauntlets(delta: float) -> void:
+	if _gauntlets.is_empty():
+		return
+	var attacking: bool = _atk_kind != 0 or _punching or _spinning or _charging
+	var rate: float = gauntlet_aim_speed if attacking else gauntlet_rest_speed
+	var k: float = 1.0 - exp(-rate * delta)
+	var fwd: Vector3 = -player.global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
+	var target = get_magnet_target()
+
+	# Déplacement : direction et part de « poings à l'horizontale » (0 → 1)
+	var hv := Vector3(player.velocity.x, 0.0, player.velocity.z)
+	var move_k: float = clampf(hv.length() / maxf(gauntlet_move_full_speed, 0.01), 0.0, 1.0)
+	var move_dir: Vector3 = hv.normalized() if hv.length() > 0.05 else fwd
+
+	for entry in _gauntlets:
+		var g: Gauntlet = entry[0]
+		var side: float = entry[1]
+		var cur: Vector3 = entry[2]
+		var hand_pos: Vector3 = g.global_position
+
+		var want: Vector3 = Vector3.DOWN
+		if attacking:
+			want = _gauntlet_attack_dir(hand_pos, fwd, target)
+		elif move_k > 0.0:
+			# En marche : les poings passent à l'horizontale, jointures vers
+			# l'arrière (ils traînent derrière le mouvement)
+			want = _slerp_dir(Vector3.DOWN, -move_dir, move_k)
+		cur = _slerp_dir(cur, want, k)
+		entry[2] = cur
+
+		# Roulis : pouce en haut pour frapper, en bas en marche (transition douce)
+		var want_roll: float = gauntlet_roll if attacking \
+			else lerpf(gauntlet_roll, gauntlet_move_roll, move_k)
+		var roll: float = lerpf(entry[3], want_roll, k)
+		entry[3] = roll
+
+		# Référence « haut » : le ciel quand le poing est à l'horizontale,
+		# l'avant du joueur quand il pend (sinon la base est indéfinie)
+		var up_hint: Vector3 = Vector3.UP.lerp(fwd, clampf(absf(cur.y), 0.0, 1.0))
+		if absf(cur.normalized().dot(up_hint.normalized())) > 0.98:
+			up_hint = fwd if absf(cur.dot(fwd)) < 0.98 else Vector3.RIGHT
+		var aim := Basis.looking_at(cur, up_hint)
+		# Poing vertical : pouce vers le haut (ou vers l'avant quand il pend)
+		aim = aim * Basis(Vector3(0.0, 0.0, 1.0), deg_to_rad(-roll * side))
+
+		var parent_rot: Basis = (g.get_parent() as Node3D).global_basis.orthonormalized()
+		g.quaternion = (parent_rot.inverse() * aim).get_rotation_quaternion()
+
+
+## Où pointent les jointures pendant un coup : vers la cible si le magnétisme
+## en tient une, sinon vers l'extérieur et l'avant (toupie : vers l'extérieur).
+func _gauntlet_attack_dir(hand_pos: Vector3, fwd: Vector3, target) -> Vector3:
+	var out: Vector3 = hand_pos - _body_pos
+	out.y = 0.0
+	if _spinning:
+		return out.normalized() if out.length() > 0.01 else fwd
+	if target != null and is_instance_valid(target):
+		var to_t: Vector3 = (target as Node3D).global_position + Vector3.UP * 0.5 - hand_pos
+		if to_t.length() > 0.05:
+			return to_t.normalized()
+	var d: Vector3 = fwd + (out.normalized() * 0.4 if out.length() > 0.01 else Vector3.ZERO)
+	return d.normalized()
+
+
+## Interpolation de direction sans passer par un vecteur nul.
+func _slerp_dir(from: Vector3, to: Vector3, k: float) -> Vector3:
+	if from.length() < 0.01:
+		return to
+	var a: Vector3 = from.normalized()
+	if a.dot(to) < -0.999:
+		# Demi-tour pile : on passe par l'avant pour éviter l'ambiguïté
+		a = (a + Vector3.FORWARD * 0.01).normalized()
+	return a.slerp(to, k).normalized()
+
+
+## La lueur de charge va sur le gantelet s'il existe, sinon sur la sphère.
+func _set_hand_r_overlay(mat: Material) -> void:
+	if _gauntlet_r != null:
+		_gauntlet_r.set_overlay(mat)
+		return
+	var m := _hand_r_mesh()
+	if m != null:
+		m.material_overlay = mat
+
+
+## Pose un gantelet sur chaque main. Il est rangé sous la sphère d'origine
+## (dont on retire juste le maillage) : le gonflement du poing en charge
+## pleine, qui agit sur l'échelle de cette sphère, s'applique donc aussi.
+func _attach_gauntlets() -> void:
+	for data in [[hand_l, -1.0], [hand_r, 1.0]]:
+		var hand: Node3D = data[0]
+		var side: float = data[1]
+		var g := Gauntlet.create(side, gauntlet_outline)
+
+		var holder: Node3D = hand
+		for c in hand.get_children():
+			if c is MeshInstance3D:
+				holder = c
+				(c as MeshInstance3D).mesh = null
+				break
+		holder.add_child(g)
+		_gauntlets.append([g, side, Vector3.DOWN, gauntlet_roll])
+		# Les cotes du gantelet sont en mètres : on annule l'échelle du support
+		var sc: Vector3 = holder.scale
+		g.scale = Vector3(1.0 / maxf(sc.x, 0.001), 1.0 / maxf(sc.y, 0.001), 1.0 / maxf(sc.z, 0.001)) * gauntlet_scale
+
+		if side > 0.0:
+			_gauntlet_r = g
 
 
 func _hand_r_mesh() -> MeshInstance3D:

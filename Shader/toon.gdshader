@@ -27,7 +27,15 @@ void light() {
 	banded = smoothstep(0.0, shade_softness, ndotl - banded * (1.0 - shade_softness));
 	banded = clamp(banded + floor(ndotl * steps) / steps, 0.0, 1.0);
 
-	vec3 lit_color = mix(shadow_color.rgb * ALBEDO, ALBEDO, max(banded, ambient_floor));
-
-	DIFFUSE_LIGHT += lit_color * ATTENUATION * LIGHT_COLOR;
+	if (LIGHT_IS_DIRECTIONAL) {
+		// Soleil : ATTENUATION ne contient que l'ombre portée. On la traite
+		// comme une bande de plus du dégradé toon : une zone à l'ombre prend
+		// la teinte shadow_color au lieu de tomber au noir complet.
+		float lit = max(banded * ATTENUATION, ambient_floor);
+		DIFFUSE_LIGHT += mix(shadow_color.rgb * ALBEDO, ALBEDO, lit) * LIGHT_COLOR;
+	} else {
+		// Lampes locales : ATTENUATION porte aussi la portée, on la garde
+		vec3 lit_color = mix(shadow_color.rgb * ALBEDO, ALBEDO, max(banded, ambient_floor));
+		DIFFUSE_LIGHT += lit_color * ATTENUATION * LIGHT_COLOR;
+	}
 }

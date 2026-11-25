@@ -24,25 +24,32 @@ signal died
 @export_group("Distances")
 @export var detect_range: float = 13.0
 @export var lose_range: float = 17.0
-@export var keep_min: float = 5.0      ## trop près : il recule
+@export var flee_range: float = 5.5    ## trop près : il fuit
 @export var keep_max: float = 9.0      ## trop loin : il avance
 @export var strafe_speed: float = 2.4
-@export var flee_speed: float = 3.6    ## plus rapide en fuite qu'en approche
+@export var run_speed: float = 4.6     ## vitesse de fuite (le joueur reste plus rapide)
+@export var panic_range: float = 3.2   ## si le joueur arrive à cette distance pendant la visée, il abandonne et fuit
+@export var wall_probe: float = 1.6    ## distance de détection des murs dans la direction de fuite
 
 @export_group("Tir")
 @export var aim_time: float = 1.0      ## télégraphe : c'est lui qui rend le tir esquivable
-@export var shoot_recover: float = 0.6
-@export var shoot_cooldown: float = 2.2
+@export var shoot_recover: float = 0.4
+@export var shoot_cooldown: float = 1.6
 @export var muzzle_offset: float = 0.9 ## distance de spawn devant lui
 @export var muzzle_height: float = 0.9
 @export var lead_factor: float = 0.25  ## anticipation du déplacement du joueur
+@export var projectile_speed: float = 6.5  ## écrase la vitesse du projectile
+## Layers du décor qui bloquent la ligne de vue (murs, poteaux).
+@export_flags_3d_physics var sight_mask: int = 1
 
 @export_group("Déplacement")
 @export var turn_speed: float = 7.0
 @export var gravity: float = 20.0
 
 @export_group("Recul")
-@export var knockback_force: float = 9.0
+@export var knockback_force: float = 3.5   ## recul d'un coup léger : faible, pour pouvoir enchaîner
+## Multiplicateur max du recul pour un coup lourd (dégâts > damage_per_hit)
+@export var heavy_knockback_mult: float = 2.5
 @export var knockback_damping: float = 8.0
 @export var hurt_time: float = 0.28
 
@@ -172,8 +179,9 @@ func _reposition(delta: float) -> void:
 		_set_state(State.IDLE)
 		return
 
-	# En bonne fourchette et rechargé : il vise
-	if d >= keep_min and d <= keep_max and _cooldown <= 0.0:
+	# En bonne fourchette, rechargé et avec une ligne de vue dégagée : il vise.
+	# Sinon il continue de tourner autour pour trouver un angle.
+	if d >= flee_range and d <= keep_max and _cooldown <= 0.0 and _has_line_of_sight():
 		_set_state(State.AIM)
 		_start_aim()
 		return
@@ -182,9 +190,9 @@ func _reposition(delta: float) -> void:
 	var move := Vector3.ZERO
 	var spd := strafe_speed
 
-	if d < keep_min:
-		move = -to_player                        # recule
-		spd = flee_speed
+	if d < flee_range:
+		move = _flee_direction(-to_player)       # fuit en évitant les murs
+		spd = run_speed
 	elif d > keep_max:
 		move = to_player                         # approche
 	else:
@@ -193,7 +201,41 @@ func _reposition(delta: float) -> void:
 	move = move.normalized()
 	velocity.x = move.x * spd
 	velocity.z = move.z * spd
-	_face(to_player, delta)
+	# En fuite, il regarde où il court ; sinon il garde le joueur en vue
+	_face(move if d < flee_range else to_player, delta)
+
+
+## Direction de fuite : à l'opposé du joueur si possible, sinon l'angle libre
+## le plus proche. Coincé de partout, il longe le mur pour tenter de passer.
+func _flee_direction(away: Vector3) -> Vector3:
+	away.y = 0.0
+	if away.length() < 0.01:
+		away = global_transform.basis.z
+	away = away.normalized()
+	for deg: float in [0.0, 35.0, 70.0, 105.0]:
+		for side: float in [_strafe_dir, -_strafe_dir]:
+			var dir: Vector3 = away.rotated(Vector3.UP, deg_to_rad(deg) * side)
+			if _path_clear(dir):
+				return dir
+			if deg == 0.0:
+				break
+	# Dos au mur : il le longe, et ne change de côté que si celui-ci est bloqué
+	var slide: Vector3 = away.cross(Vector3.UP) * _strafe_dir
+	if not _path_clear(slide):
+		_strafe_dir = -_strafe_dir
+		slide = -slide
+	return slide
+
+
+func _path_clear(dir: Vector3) -> bool:
+	var from: Vector3 = global_position + Vector3.UP * 0.5
+	var query := PhysicsRayQueryParameters3D.create(from, from + dir * wall_probe, sight_mask)
+	query.exclude = [get_rid()]
+	var res: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
+	if res.is_empty():
+		return true
+	# Le joueur ou un autre ennemi ne sont pas des murs
+	return res["collider"] is CharacterBody3D
 
 
 func _aim(delta: float) -> void:
@@ -203,11 +245,21 @@ func _aim(delta: float) -> void:
 
 	_face(_dir_to_player(), delta)
 
+	# Le joueur a foncé sur lui : il abandonne son tir et prend la fuite
+	if _distance_to_player() < panic_range:
+		_cancel_aim()
+		_cooldown = maxf(_cooldown, 0.8)
+		return
+
 	# Il se ramasse puis s'étire, comme une arbalète qu'on bande
 	var k: float = _t / aim_time
 	mesh.scale = _base_scale * Vector3(1.0 - k * 0.15, 1.0 + k * 0.3, 1.0 - k * 0.15)
 
 	if _t >= aim_time:
+		# Le joueur s'est caché derrière un obstacle : tir annulé
+		if not _has_line_of_sight():
+			_cancel_aim()
+			return
 		_set_state(State.SHOOT)
 
 
@@ -221,6 +273,7 @@ func _shoot() -> void:
 		get_tree().current_scene.add_child(p)
 		p.global_position = global_position + dir * muzzle_offset + Vector3.UP * muzzle_height
 		p.direction = dir
+		p.speed = projectile_speed
 		p.shooter = self
 		Sfx.play("shoot", global_position)
 
@@ -288,6 +341,37 @@ func _aim_direction() -> Vector3:
 	return v.normalized()
 
 
+## Vrai si aucun élément de décor ne sépare la bouche du canon du torse.
+func _has_line_of_sight() -> bool:
+	var from: Vector3 = global_position + Vector3.UP * muzzle_height
+	var to: Vector3 = _aim_point()
+	var query := PhysicsRayQueryParameters3D.create(from, to, sight_mask)
+	var exclude: Array[RID] = [get_rid()]
+	var space := get_world_3d().direct_space_state
+	for i in 6:
+		query.exclude = exclude
+		var res: Dictionary = space.intersect_ray(query)
+		if res.is_empty():
+			return true
+		# Joueur et autres ennemis ne cachent pas la cible (le tir les traverse)
+		var col: Object = res["collider"]
+		if col is CharacterBody3D or col is RigidBody3D:
+			exclude.append(res["rid"])
+			continue
+		return false
+	return true
+
+
+func _cancel_aim() -> void:
+	mesh.scale = _base_scale
+	if _flash_tween != null and _flash_tween.is_running():
+		_flash_tween.kill()
+	_mat.albedo_color = _base_color
+	_strafe_dir = -_strafe_dir   # change de côté pour chercher un angle
+	_cooldown = 0.4
+	_set_state(State.REPOSITION)
+
+
 func _face(dir: Vector3, delta: float) -> void:
 	if dir.length() < 0.01:
 		return
@@ -334,7 +418,10 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 	# qui a couvert la distance pour aller le déranger.
 	mesh.scale = _base_scale
 
-	_knockback = direction * knockback_force
+	# Coups légers : petit recul, l'ennemi reste à portée du combo.
+	# Coups lourds (finisher, poing chargé) : recul proportionnel aux dégâts.
+	var heavy: float = clampf(float(damage) / float(maxi(damage_per_hit, 1)), 1.0, heavy_knockback_mult)
+	_knockback = direction * knockback_force * heavy
 	_set_state(State.HURT)
 	_flash()
 

@@ -12,7 +12,10 @@ class_name ItemData
 @export var display_name: String = "Petite clé"
 @export_multiline var description: String = "Ouvre une porte verrouillée de ce donjon."
 @export var icon: Texture2D
-@export var color := Color(1.0, 0.82, 0.2)   ## teinte du modèle et du halo
+## Couleur de la petite clé, partout où elle apparaît (coffre, sol, porte).
+const KEY_COLOR := Color(0.82, 0.82, 0.85)
+
+@export var color := KEY_COLOR   ## teinte du modèle et du halo
 
 
 static func small_key() -> ItemData:
@@ -37,23 +40,15 @@ static func build_key_model(c: Color) -> Node3D:
 
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = c
-	mat.metallic = 0.6
-	mat.roughness = 0.3
+	mat.metallic = 0.5
+	mat.roughness = 0.35
 	mat.emission_enabled = true
 	mat.emission = c
-	mat.emission_energy_multiplier = 0.35
+	mat.emission_energy_multiplier = 0.2
 
-	var ring := MeshInstance3D.new()
-	var torus := TorusMesh.new()
-	torus.inner_radius = 0.1
-	torus.outer_radius = 0.22
-	ring.mesh = torus
-	ring.rotation.x = PI * 0.5
-	ring.position.y = 0.3
-	ring.material_override = mat
-	root.add_child(ring)
-
+	# Tête : un rectangle plein. Tige et dents en dessous.
 	for part: Array in [
+		[Vector3(0.36, 0.26, 0.09), Vector3(0.0, 0.3, 0.0)],
 		[Vector3(0.09, 0.5, 0.09), Vector3(0.0, -0.08, 0.0)],
 		[Vector3(0.16, 0.07, 0.09), Vector3(0.1, -0.22, 0.0)],
 		[Vector3(0.12, 0.07, 0.09), Vector3(0.08, -0.32, 0.0)],

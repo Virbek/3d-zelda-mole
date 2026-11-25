@@ -115,7 +115,10 @@ func _physics_process(delta: float) -> void:
 	if _dodge_cd > 0.0:
 		_dodge_cd = maxf(_dodge_cd - delta, 0.0)
 
-	if controls_enabled and Input.is_action_just_pressed("dodge") and not is_dodging and _dodge_cd <= 0.0:
+	if controls_enabled and Input.is_action_just_pressed("dodge") and not is_dodging and _dodge_cd <= 0.0 \
+			and not combat.is_movement_locked:
+		# L'esquive interrompt la toupie au lieu d'attendre sa fin
+		combat.cancel_spin()
 		is_dodging = true
 		_iframe_t = 0.0
 		is_invulnerable = false
@@ -154,7 +157,16 @@ func _physics_process(delta: float) -> void:
 			is_invulnerable = false
 		return
 	else:
-		is_invulnerable = false
+		# Invincible pendant le coup lourd : le joueur y est immobile et
+		# engagé, il ne doit pas être puni pour l'avoir déclenché.
+		is_invulnerable = combat.is_movement_locked
+
+	# Coup lourd ou propulsion du poing chargé : Combat pilote le corps
+	if combat.is_movement_locked:
+		is_sprinting = false
+		_apply_gravity(delta)
+		move_and_slide()
+		return
 
 	# --- Sprint ---
 	is_sprinting = controls_enabled and Input.is_action_pressed("sprint") and direction.length_squared() > 0.01

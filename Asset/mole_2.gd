@@ -9,6 +9,14 @@ extends Node3D
 @export var outline_shader: Shader
 @export var outline_width: float = 0.012
 @export var outline_skip: Array[String] = ["plane", "plane_1", "plane_2", "plane_3", "plane_4"]  ## pièces fines : pas de contour dessus
+## Pièces du modèle masquées au lancement, remplacées par la tenue construite
+## par script (Script/player/mole_outfit.gd) :
+##   cylinder_2 = l'ancien poncho rouge
+##   cylinder_1 = le chapeau ; tube, tube_1, circle, circle_1, plane_6 = les lunettes
+@export var hidden_parts: Array[String] = [
+	"cylinder_2",
+	"cylinder_1", "tube", "tube_1", "circle", "circle_1", "plane_6",
+]
 
 
 func _ready() -> void:
@@ -16,6 +24,8 @@ func _ready() -> void:
 
 
 func _apply_to_all(node: Node) -> void:
+	if node is Node3D and hidden_parts.has(node.name):
+		(node as Node3D).visible = false
 	if node is MeshInstance3D and node.mesh != null:
 		var count: int = node.mesh.get_surface_count()
 		for i in count:

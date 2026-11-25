@@ -33,7 +33,7 @@ signal died
 @export var gravity: float = 20.0
 
 @export_group("Charge")
-@export var telegraph_time: float = 0.75   ## temps d'arrêt avant de foncer
+@export var telegraph_time: float = 0.6   ## temps d'arrêt avant de foncer
 @export var charge_speed: float = 13.0
 ## Doit dépasser charge_range d'une bonne marge : sinon reculer tout droit
 ## pendant le télégraphe suffit à sortir du couloir avant que la charge ne
@@ -41,9 +41,9 @@ signal died
 ## reculant pendant telegraph_time.
 @export var charge_distance: float = 10.0
 @export var charge_max_time: float = 1.2   ## sécurité anti-blocage
-@export var recover_time: float = 0.9      ## fenêtre de punition pour le joueur
+@export var recover_time: float = 0.6      ## fenêtre de punition pour le joueur
 @export var charge_damage: int = 1
-@export var charge_cooldown: float = 1.2
+@export var charge_cooldown: float = 0.7
 
 @export_group("Couloir de charge")
 @export var charge_zone_scene: PackedScene
@@ -55,7 +55,9 @@ signal died
 @export var circle_dir: float = 1.0        ## 1 ou -1, tiré au sort au démarrage
 
 @export_group("Recul")
-@export var knockback_force: float = 9.0
+@export var knockback_force: float = 3.5   ## recul d'un coup léger : faible, pour pouvoir enchaîner
+## Multiplicateur max du recul pour un coup lourd (dégâts > damage_per_hit)
+@export var heavy_knockback_mult: float = 2.5
 @export var knockback_damping: float = 8.0
 @export var hurt_time: float = 0.28
 
@@ -471,7 +473,10 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 		_charge_zone.queue_free()
 		_charge_zone = null
 
-	_knockback = direction * knockback_force
+	# Coups légers : petit recul, l'ennemi reste à portée du combo.
+	# Coups lourds (finisher, poing chargé) : recul proportionnel aux dégâts.
+	var heavy: float = clampf(float(damage) / float(maxi(damage_per_hit, 1)), 1.0, heavy_knockback_mult)
+	_knockback = direction * knockback_force * heavy
 	_set_state(State.HURT)
 	_flash()
 

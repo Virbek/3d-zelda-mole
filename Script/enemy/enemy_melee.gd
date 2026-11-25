@@ -38,13 +38,13 @@ signal died
 
 @export_group("Attaque")
 @export var attack_range: float = 1.9      ## distance à laquelle il arme son coup
-@export var windup_time: float = 0.55      ## télégraphe : ne descends pas sous ~0.4s
+@export var windup_time: float = 0.42      ## télégraphe : ne descends pas sous ~0.4s
 @export var windup_track: float = 0.6      ## part du télégraphe pendant laquelle il suit encore le joueur
 @export var strike_time: float = 0.18      ## fenêtre active de la frappe
 @export var strike_lunge: float = 4.5      ## petit pas en avant pendant la frappe
-@export var recover_time: float = 0.7      ## fenêtre de punition pour le joueur
+@export var recover_time: float = 0.45     ## fenêtre de punition pour le joueur
 @export var attack_damage: int = 1
-@export var attack_cooldown: float = 1.0
+@export var attack_cooldown: float = 0.5
 @export var lean_angle: float = 0.45       ## inclinaison (radians) pendant l'armement
 
 @export_group("Encerclement")
@@ -52,7 +52,9 @@ signal died
 @export var circle_speed: float = 2.2
 
 @export_group("Recul")
-@export var knockback_force: float = 9.0
+@export var knockback_force: float = 3.5   ## recul d'un coup léger : faible, pour pouvoir enchaîner
+## Multiplicateur max du recul pour un coup lourd (dégâts > damage_per_hit)
+@export var heavy_knockback_mult: float = 2.5
 @export var knockback_damping: float = 8.0
 @export var hurt_time: float = 0.28
 
@@ -104,6 +106,10 @@ var _base_mesh_y: float = 0.0
 var _flash_tween: Tween
 var _tele_tween: Tween
 
+## Apparence du lucane-cisaille (null si désactivée : on garde la capsule)
+@export var use_beetle_model: bool = true
+var _model: StagBeetleModel = null
+
 
 func _ready() -> void:
 	player = get_node_or_null(player_path)
@@ -120,6 +126,14 @@ func _ready() -> void:
 	_mat = base.duplicate() if base != null else StandardMaterial3D.new()
 	mesh.material_override = _mat
 	_base_color = _mat.albedo_color
+
+	# Le lucane est rangé sous le mesh : il hérite de l'inclinaison, de
+	# l'écrasement et des secousses que ce script applique déjà au mesh.
+	if use_beetle_model:
+		_model = StagBeetleModel.new()
+		mesh.add_child(_model)
+		_model.position.y = -_base_mesh_y   # pattes au sol
+		mesh.mesh = null
 
 	health_bar.set_ratio(1.0)
 	attack_box.monitoring = false
@@ -158,6 +172,37 @@ func _physics_process(delta: float) -> void:
 
 	_apply_gravity(delta)
 	move_and_slide()
+
+
+## Visuel uniquement : pinces, pattes, yeux et teinte du lucane.
+func _process(delta: float) -> void:
+	if _model == null:
+		return
+	_model.set_tint(_mat.albedo_color, _base_color)
+
+	var open: float = 0.0
+	var threat: float = 0.0
+	match state:
+		State.WINDUP:
+			# Les pinces s'écartent pendant tout le télégraphe
+			open = clampf(_t / windup_time, 0.0, 1.0)
+			threat = open
+		State.STRIKE:
+			# Claquement : fermeture complète dans la première moitié de la frappe
+			open = 1.0 - clampf(_t / maxf(strike_time * 0.4, 0.01), 0.0, 1.0)
+			threat = 1.0
+		State.STUNNED:
+			open = 0.45 + sin(_t * 9.0) * 0.3
+		State.DEAD, State.RECOVER, State.HURT:
+			open = 0.0
+		_:
+			# Cliquetis menaçant en approche
+			open = 0.12 + sin(Time.get_ticks_msec() * 0.008) * 0.08
+	_model.set_pincers(open)
+	_model.set_eyes_threat(threat)
+
+	var hv := Vector2(velocity.x, velocity.z)
+	_model.set_walk(hv.length(), delta)
 
 
 func _set_state(next: State) -> void:
@@ -411,7 +456,10 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 	AttackToken.release(self)
 	_reset_pose()
 
-	_knockback = direction * knockback_force
+	# Coups légers : petit recul, l'ennemi reste à portée du combo.
+	# Coups lourds (finisher, poing chargé) : recul proportionnel aux dégâts.
+	var heavy: float = clampf(float(damage) / float(maxi(damage_per_hit, 1)), 1.0, heavy_knockback_mult)
+	_knockback = direction * knockback_force * heavy
 	_set_state(State.HURT)
 	_flash()
 

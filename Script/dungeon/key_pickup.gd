@@ -7,7 +7,7 @@ class_name KeyPickup
 
 signal collected
 
-@export var color := Color(1.0, 0.82, 0.2)
+@export var color := ItemData.KEY_COLOR
 @export var spin_speed: float = 2.5
 @export var bob_height: float = 0.15
 @export var hover_y: float = 0.8

@@ -57,7 +57,7 @@ func _build_key_label() -> void:
 	_key_label = Label.new()
 	_key_label.position = Vector2(24, 24 + bar_height + 14)
 	_key_label.add_theme_font_size_override("font_size", 26)
-	_key_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.2))
+	_key_label.add_theme_color_override("font_color", Color(0.82, 0.82, 0.85))
 	_key_label.add_theme_color_override("font_outline_color", Color.BLACK)
 	_key_label.add_theme_constant_override("outline_size", 6)
 	add_child(_key_label)

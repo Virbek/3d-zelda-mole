@@ -4,7 +4,8 @@ extends Node
 ##
 ## Trois outils qui ne se recouvrent pas :
 ##   - le combo, en boucle 1→2→1→2..., au contact
-##   - le poing chargé, à distance : le bras part seul, le joueur reste au sol
+##   - le poing chargé, à distance : le bras part seul ; s'il accroche un
+##     ennemi, le joueur est propulsé jusqu'à lui pour enchaîner le combo
 ##   - la commande réaction, débloquée près d'un ennemi étourdi : toupie ou
 ##     coup lourd ciblé (finisher) selon ce que l'ennemi étourdi préfère
 ##
@@ -44,6 +45,13 @@ extends Node
 @export var hop_force: float = 4.5
 @export var hop_forward: float = 3.0
 @export var finisher_damage_multiplier: float = 2.5
+## Durée du coup lourd déclenché par la commande réaction. Remplace
+## durations[2] : un finisher trop long casse le rythme du combat.
+@export var finisher_duration: float = 0.45
+## Distance à laquelle le joueur s'arrête devant l'ennemi étourdi.
+@export var finisher_standoff: float = 1.2
+## Vitesse max du bond vers l'ennemi étourdi (évite de traverser la salle).
+@export var finisher_max_speed: float = 12.0
 
 @export_group("Rapprochement")
 @export var lunge_range: float = 3.5
@@ -67,10 +75,16 @@ extends Node
 @export var punch_range_max: float = 7.0
 @export var punch_damage: int = 3
 @export var punch_shake: float = 0.5
+## Quand le poing chargé touche, le joueur est propulsé jusqu'à l'ennemi
+## (le poing reste accroché, le corps est tiré vers lui), prêt à enchaîner.
+@export var zip_speed: float = 24.0
+@export var zip_standoff: float = 1.3      ## distance d'arrivée devant l'ennemi
+@export var zip_max_time: float = 0.4      ## sécurité : abandon si l'ennemi est inatteignable
+@export var zip_arrive_shake: float = 0.25
 
 @export_group("Toupie")
 @export var spin_trigger_range: float = 3.0  ## distance à l'ennemi étourdi
-@export var spin_duration: float = 1.6
+@export var spin_duration: float = 0.9
 @export var spin_damage: int = 1
 @export var spin_tick: float = 0.25          ## délai entre deux dégâts sur le même ennemi
 @export var spin_shake: float = 0.2
@@ -85,8 +99,13 @@ extends Node
 @export var prompt_color := Color(1.0, 0.85, 0.2)
 
 @export_group("Hit stop")
-@export var hit_stop_time: float = 0.035
-@export var hit_stop_scale: float = 0.1
+@export var hit_stop_time: float = 0.0            ## coup du combo (0 = pas de gel)
+@export var finisher_hit_stop_time: float = 0.11  ## coup lourd
+@export var hit_stop_scale: float = 0.0           ## 0 = arrêt net, plus sec qu'un ralenti
+
+@export_group("Impact")
+@export var hit_shake: float = 0.15        ## secousse caméra d'un coup du combo
+@export var finisher_shake: float = 0.45   ## secousse caméra du coup lourd
 
 @onready var player: CharacterBody3D = get_parent()
 @onready var rig: Node3D = get_node(rig_path)
@@ -115,10 +134,18 @@ var _charge_t: float = 0.0
 var _punch_t: float = 0.0
 var _punch_power: float = 0.0
 
+## Ennemi accroché par le poing chargé, vers lequel le joueur est tiré.
+var _zip_target: Node3D = null
+var _zip_t: float = 0.0
+
 var _spin_t: float = 0.0
 var _spin_hits: Dictionary = {}   ## ennemi → temps du dernier dégât
 
 var _dodge_buffer_t: float = 0.0
+
+## Ennemi étourdi visé par le coup lourd en cours. Tant qu'il est défini,
+## le joueur ne contrôle plus ni sa direction ni son déplacement.
+var _finisher_target: Node3D = null
 
 var _sparks: HitSparks = null
 
@@ -130,6 +157,22 @@ var _prompt_t: float = 0.0
 var is_attacking: bool:
 	get:
 		return _step != 0
+
+## Vrai pendant le coup lourd verrouillé sur un ennemi étourdi.
+var is_finishing: bool:
+	get:
+		return _step == 3 and _finisher_target != null
+
+## Vrai pendant que le joueur est tiré vers l'ennemi accroché.
+var is_zipping: bool:
+	get:
+		return _zip_target != null
+
+## Le joueur ne contrôle plus son déplacement et est invincible : Combat
+## pilote le corps (coup lourd ou propulsion du poing chargé).
+var is_movement_locked: bool:
+	get:
+		return is_finishing or is_zipping
 
 
 func _ready() -> void:
@@ -212,7 +255,10 @@ func _physics_process(delta: float) -> void:
 	if _step == 0:
 		return
 
-	_t += delta / durations[_step - 1]
+	var dur: float = finisher_duration if _step == 3 else durations[_step - 1]
+	_t += delta / maxf(dur, 0.01)
+	if _step == 3:
+		_steer_finisher(dur)
 	rig.set_attack_progress(minf(_t, 1.0))
 
 	# --- Fenêtre de coup : on n'active les poings que sur cet intervalle ---
@@ -232,6 +278,9 @@ func _physics_process(delta: float) -> void:
 	if _t >= 1.0:
 		rig.end_attack()
 		_set_fists(false, false)
+		if _finisher_target != null:
+			_finisher_target = null
+			rig.set_forced_magnet(null)
 		_step = 0
 		_t = 0.0
 		_grace = chain_grace
@@ -272,10 +321,42 @@ func _start(step: int) -> void:
 
 
 func _hop() -> void:
-	var fwd: Vector3 = -player.global_transform.basis.z
 	player.velocity.y = hop_force
+	# Verrouillé sur une cible : c'est _steer_finisher qui gère l'horizontale
+	if _finisher_target != null:
+		return
+	var fwd: Vector3 = -player.global_transform.basis.z
 	player.velocity.x += fwd.x * hop_forward
 	player.velocity.z += fwd.z * hop_forward
+
+
+## Pendant le coup lourd : le joueur reste tourné vers l'ennemi étourdi et
+## bondit pour arriver pile devant lui au moment où la fenêtre de coup s'ouvre.
+func _steer_finisher(dur: float) -> void:
+	if _finisher_target == null:
+		return
+	if not is_instance_valid(_finisher_target):
+		_finisher_target = null
+		rig.set_forced_magnet(null)
+		return
+
+	var to_t: Vector3 = _finisher_target.global_position - player.global_position
+	to_t.y = 0.0
+	var d: float = to_t.length()
+	if d > 0.01:
+		player.rotation.y = atan2(-to_t.x, -to_t.z)
+
+	# Temps restant avant l'impact ; une fois l'impact atteint, on se pose
+	var hit_at: float = hit_windows[2].x
+	var remaining: float = (hit_at - _t) * dur
+	if remaining <= 0.0 or d <= finisher_standoff:
+		player.velocity.x = 0.0
+		player.velocity.z = 0.0
+		return
+	var spd: float = minf((d - finisher_standoff) / maxf(remaining, 0.05), finisher_max_speed)
+	var dir: Vector3 = to_t / d
+	player.velocity.x = dir.x * spd
+	player.velocity.z = dir.z * spd
 
 
 ## Le finisher n'est plus une suite du combo : c'est ce que déclenche la
@@ -291,6 +372,9 @@ func _start_finisher(target: Node) -> void:
 	if to_t.length() > 0.01:
 		player.rotation.y = atan2(-to_t.x, -to_t.z)
 
+	_finisher_target = target as Node3D
+	# Le poing vise l'ennemi étourdi, pas celui vers lequel pousse le stick
+	rig.set_forced_magnet(target)
 	_start(3)
 
 
@@ -356,7 +440,10 @@ func _collect_hits() -> void:
 			else:
 				Sfx.play("hit_light", e.global_position)
 			_sparks.burst(fist.global_position, dir, _step == 3)
-			_hit_stop()
+			# Gel du temps réservé aux gros coups : le combo reste fluide
+			if _step == 3:
+				_hit_stop(true)
+			_shake(finisher_shake if _step == 3 else hit_shake)
 
 			var side: float = 1.0 if fist == fist_r else -1.0
 			rig.hit_impact(0.0 if _step == 3 else side)
@@ -447,6 +534,13 @@ func _release_charge() -> void:
 
 func _process_punch(delta: float) -> void:
 	var total: float = punch_out_time + punch_hold_time + punch_back_time
+
+	# Propulsion : le poing reste figé à l'impact pendant que le corps le rejoint
+	if _zip_target != null:
+		_punch_hits()
+		_process_zip(delta, total)
+		return
+
 	_punch_t += delta
 	rig.set_punch_progress(_punch_t / total)
 
@@ -486,8 +580,52 @@ func _punch_hits() -> void:
 		rig.hit_impact(1.0)
 		_play_hit_sound("hit_heavy", e.global_position, 3.0)
 		_sparks.burst(fist_r.global_position, dir, true)
-		_hit_stop()
+		_hit_stop(true)   # poing chargé : gros coup
 		_shake(punch_shake * _punch_power)
+
+		# Premier ennemi accroché : c'est vers lui que le joueur part
+		if _zip_target == null and e is Node3D:
+			_zip_target = e
+			_zip_t = 0.0
+
+
+## Tire le joueur vers l'ennemi accroché. À l'arrivée, le poing chargé se
+## termine aussitôt et le combo est disponible (coup 1).
+func _process_zip(delta: float, total: float) -> void:
+	_zip_t += delta
+	# Le poing reste à l'arrêt sur l'impact tant que le corps n'est pas arrivé
+	rig.set_punch_progress(minf(_punch_t, punch_out_time + punch_hold_time) / total)
+
+	var arrived: bool = false
+	if not is_instance_valid(_zip_target) or _zip_t >= zip_max_time:
+		arrived = true
+	else:
+		var to_t: Vector3 = _zip_target.global_position - player.global_position
+		to_t.y = 0.0
+		var d: float = to_t.length()
+		if d <= zip_standoff:
+			arrived = true
+		else:
+			var dir: Vector3 = to_t / d
+			player.rotation.y = atan2(-dir.x, -dir.z)
+			# Ne dépasse pas le point d'arrivée en une frame
+			var spd: float = minf(zip_speed, (d - zip_standoff) / maxf(delta, 0.001))
+			player.velocity.x = dir.x * spd
+			player.velocity.z = dir.z * spd
+
+	if not arrived:
+		return
+
+	_zip_target = null
+	player.velocity.x = 0.0
+	player.velocity.z = 0.0
+	_shake(zip_arrive_shake)
+	is_punching = false
+	_set_fists(false, false)
+	rig.end_punch()
+	# Enchaînement direct : le prochain clic part en coup 1 du combo
+	_last_step = 0
+	_grace = chain_grace
 
 
 # ---------------------------------------------------------------- TOUPIE
@@ -527,10 +665,18 @@ func _process_spin(delta: float) -> void:
 	_spin_hits_check()
 
 	if _spin_t >= spin_duration:
-		is_spinning = false
-		_set_fists(false, false)
-		rig.end_spin()
-		_grace = chain_grace
+		cancel_spin()
+
+
+## Termine la toupie. Appelé à la fin normale, ou par le joueur quand il
+## esquive : l'esquive doit toujours partir immédiatement.
+func cancel_spin() -> void:
+	if not is_spinning:
+		return
+	is_spinning = false
+	_set_fists(false, false)
+	rig.end_spin()
+	_grace = chain_grace
 
 
 ## Contrairement au combo, un même ennemi peut être touché plusieurs fois :
@@ -564,12 +710,13 @@ func _spin_hits_check() -> void:
 # ---------------------------------------------------------------- RESSENTI
 
 ## Micro-gel du temps à l'impact. C'est ce qui donne le poids aux coups.
-func _hit_stop() -> void:
-	if hit_stop_time <= 0.0:
+func _hit_stop(heavy: bool = false) -> void:
+	var dur: float = finisher_hit_stop_time if heavy else hit_stop_time
+	if dur <= 0.0:
 		return
 	# Passe par l'autoload : un seul propriétaire de Engine.time_scale, sinon
 	# deux gels concurrents se remettent mutuellement à 1.0.
-	HitStop.hit(hit_stop_time, hit_stop_scale)
+	HitStop.hit(dur, hit_stop_scale)
 
 
 ## Joue key s'il existe, sinon retombe sur hit_light : un son manquant

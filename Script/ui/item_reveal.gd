@@ -26,18 +26,19 @@ func _ready() -> void:
 func show_item(item: ItemData) -> void:
 	_build(item)
 	_shown_t = 0.0
+	# On anime la racine (plein écran, hors conteneur) et pas le panneau :
+	# un enfant de conteneur déplacé à la main n'est jamais replacé, et
+	# avant la première mise en page il se retrouvait collé en haut.
 	_root.modulate.a = 0.0
-	_panel.position.y += 40.0
+	_root.position.y = 40.0
 	var t := create_tween().set_parallel(true)
 	t.tween_property(_root, "modulate:a", 1.0, 0.2)
-	t.tween_property(_panel, "position:y", _panel.position.y - 40.0, 0.25)\
+	t.tween_property(_root, "position:y", 0.0, 0.25)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
 func _process(delta: float) -> void:
 	_shown_t += delta
-	if _model_pivot != null:
-		_model_pivot.rotation.y += 1.6 * delta
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -68,9 +69,7 @@ func _build(item: ItemData) -> void:
 	# Le panneau reste dans le tiers bas : le personnage, poing levé, est visible au-dessus.
 	var bottom := MarginContainer.new()
 	bottom.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bottom.add_theme_constant_override("margin_left", 80)
-	bottom.add_theme_constant_override("margin_right", 80)
-	bottom.add_theme_constant_override("margin_bottom", 40)
+	bottom.add_theme_constant_override("margin_bottom", 48)
 	bottom.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(bottom)
 
@@ -80,20 +79,20 @@ func _build(item: ItemData) -> void:
 	bottom.add_child(anchor)
 
 	_panel = PanelContainer.new()
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.06, 0.05, 0.1, 0.88)
-	style.border_color = item.color
-	style.set_border_width_all(3)
-	style.set_corner_radius_all(12)
-	style.content_margin_left = 18
-	style.content_margin_right = 24
-	style.content_margin_top = 14
-	style.content_margin_bottom = 14
+	# Même cadre que les autres bulles : rectangle, bord gris clair, fond sombre
+	var style := InteractPrompt.make_box_style(3)
+	style.content_margin_left = 10
+	style.content_margin_right = 16
+	style.content_margin_top = 10
+	style.content_margin_bottom = 10
 	_panel.add_theme_stylebox_override("panel", style)
+	# Fenêtre compacte, centrée : elle ne s'étire plus sur toute la largeur
+	_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_panel.theme = InteractPrompt.ui_theme()
 	anchor.add_child(_panel)
 
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 22)
+	row.add_theme_constant_override("separation", 14)
 	_panel.add_child(row)
 
 	row.add_child(_build_image(item))
@@ -101,42 +100,37 @@ func _build(item: ItemData) -> void:
 	var text := VBoxContainer.new()
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	text.alignment = BoxContainer.ALIGNMENT_CENTER
-	text.add_theme_constant_override("separation", 8)
+	text.add_theme_constant_override("separation", 4)
 	row.add_child(text)
-
-	var got := Label.new()
-	got.text = "Vous obtenez"
-	got.add_theme_font_size_override("font_size", 16)
-	got.modulate = Color(1.0, 1.0, 1.0, 0.7)
-	text.add_child(got)
 
 	var title := Label.new()
 	title.text = item.display_name
-	title.add_theme_font_size_override("font_size", 34)
-	title.add_theme_color_override("font_color", item.color)
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", InteractPrompt.TITLE_COLOR)
 	title.add_theme_color_override("font_outline_color", Color.BLACK)
-	title.add_theme_constant_override("outline_size", 6)
+	title.add_theme_constant_override("outline_size", 3)
 	text.add_child(title)
 
 	var desc := Label.new()
 	desc.text = item.description
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	desc.custom_minimum_size.x = 360
-	desc.add_theme_font_size_override("font_size", 20)
+	desc.custom_minimum_size.x = 260
+	desc.add_theme_font_size_override("font_size", 12)
+	desc.add_theme_color_override("font_color", InteractPrompt.TEXT_COLOR)
 	text.add_child(desc)
 
 	var hint := Label.new()
 	hint.text = "A / E : continuer"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	hint.add_theme_font_size_override("font_size", 14)
-	hint.modulate = Color(1.0, 1.0, 1.0, 0.6)
+	hint.add_theme_font_size_override("font_size", 10)
+	hint.add_theme_color_override("font_color", InteractPrompt.MUTED_COLOR)
 	text.add_child(hint)
 
 
-## Image de l'objet : la texture si elle existe, sinon son modèle 3D qui
-## tourne dans un petit monde à part (il ne voit pas le donjon).
+## Image de l'objet : la texture si elle existe, sinon son modèle 3D, fixe,
+## rendu dans un petit monde à part (il ne voit pas le donjon).
 func _build_image(item: ItemData) -> Control:
-	const SIZE := 150
+	const SIZE := 72
 	if item.icon != null:
 		var tex := TextureRect.new()
 		tex.texture = item.icon

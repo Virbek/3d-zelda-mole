@@ -39,7 +39,9 @@ signal died
 @export var prime_scale: float = 1.55
 
 @export_group("Recul")
-@export var knockback_force: float = 11.0
+@export var knockback_force: float = 4.0   ## recul d'un coup léger : faible, pour pouvoir enchaîner
+## Multiplicateur max du recul pour un coup lourd (dégâts > damage_per_hit)
+@export var heavy_knockback_mult: float = 2.5
 @export var knockback_damping: float = 9.0
 
 @export_group("Couleurs")
@@ -224,7 +226,10 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 	# Recul visible : plus marqué pour un coup lourd
 	_hit_react.play(direction, clampf(float(damage) / float(maxi(damage_per_hit, 1)), 1.0, 2.0))
 
-	_knockback = direction * knockback_force
+	# Coups légers : petit recul, l'ennemi reste à portée du combo.
+	# Coups lourds (finisher, poing chargé) : recul proportionnel aux dégâts.
+	var heavy: float = clampf(float(damage) / float(maxi(damage_per_hit, 1)), 1.0, heavy_knockback_mult)
+	_knockback = direction * knockback_force * heavy
 	_hurt_t = 0.3
 	mesh.scale = _base_scale
 
