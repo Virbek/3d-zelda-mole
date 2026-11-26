@@ -56,6 +56,7 @@ func _on_body_entered(body: Node3D) -> void:
 		return
 	_taken = true
 	set_deferred("monitoring", false)
+	Sfx.play("key_pickup", global_position)
 	collected.emit()
 
 	var t := create_tween().set_parallel(true)

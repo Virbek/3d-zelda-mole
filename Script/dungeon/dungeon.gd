@@ -44,7 +44,8 @@ signal room_changed(cell: Vector2i)
 		layout_rooms = v
 		queue_preview()
 ## Portes entre deux cases voisines : clé (a.x, a.y, b.x, b.y), valeur
-## DOOR_OPEN ou DOOR_LOCKED.
+## DOOR_OPEN, DOOR_LOCKED, ou DOOR_ONEWAY_A / DOOR_ONEWAY_B (grille à sens
+## unique dont la dalle est dans la salle a / b de la clé).
 @export var layout_doors: Dictionary[Vector4i, int] = {}:
 	set(v):
 		layout_doors = v
@@ -114,8 +115,22 @@ signal room_changed(cell: Vector2i)
 @export var lamps_per_room: bool = true
 @export var decor_per_room: bool = true   ## dunes, poutres, tuyaux, bidons, poussière
 
+@export_group("Musique")
+## Une seule musique pour tout le donjon (music_dungeon). En combat, des
+## couches de rythme calées dessus (music_layer_1..3) entrent une à une.
+@export var music_explore_db: float = -6.0
+## Volume de chaque couche de combat une fois entrée : pouls, course, assaut
+@export var music_layer_db: Array[float] = [-5.0, -7.0, -8.0]
+## Secondes après le début du combat avant l'entrée de chaque couche
+@export var music_layer_delay: Array[float] = [0.0, 6.0, 12.0]
+@export var music_layer_fade_in: float = 1.5
+## Fondu de sortie des couches quand la salle est vidée
+@export var music_fade_time: float = 2.5
+
 const DOOR_OPEN := 1
 const DOOR_LOCKED := 2
+const DOOR_ONEWAY_A := 3   ## grille fermée, dalle dans la salle (k.x, k.y)
+const DOOR_ONEWAY_B := 4   ## grille fermée, dalle dans la salle (k.z, k.w)
 const OPEN_CHARS := "-|"
 const LOCKED_CHARS := "=!"
 const EMPTY_CHARS := " ."
@@ -134,11 +149,18 @@ var _transitioning: bool = false
 var _ready_done: bool = false
 var _preview_pending: bool = false
 
+const MUSIC_SILENT_DB := -60.0
+const MUSIC_LAYERS := ["music_layer_1", "music_layer_2", "music_layer_3"]
+var _music_layers: Array[Node] = []   ## null si le fichier manque
+var _in_combat: bool = false
+var _music_tween: Tween = null
+
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
 		queue_preview()
 		return
+	add_to_group(&"dungeon")   # l'inventaire y lit le nombre de clés
 	player = get_node_or_null(player_path)
 	camera_rig = get_node_or_null(camera_rig_path)
 	if player == null:
@@ -148,6 +170,7 @@ func _ready() -> void:
 
 	keys_changed.connect(_sync_door_keys)
 	_apply_ambiance()
+	_start_ambient_sound()
 	_build()
 	keys_changed.emit(keys)
 	# Différé : le joueur a peut-être été replacé au checkpoint dans son _ready
@@ -175,6 +198,75 @@ func _apply_ambiance() -> void:
 	ambiance.apply_to(env, sun)
 
 
+## Fond sonore en boucle, en trois couches mixées bas. Enfants du donjon :
+## ils s'arrêtent avec la scène, pas de doublon après un rechargement.
+## Une couche dont le fichier manque est simplement ignorée.
+func _start_ambient_sound() -> void:
+	# Musique et couches démarrent dans la même frame et tournent toujours
+	# ensemble (couches muettes hors combat) : elles restent calées au temps près.
+	_make_native_loop("music_dungeon")
+	for key: String in MUSIC_LAYERS:
+		_make_native_loop(key)
+	Sfx.attach_loop("music_dungeon", self, music_explore_db, false)
+	for key: String in MUSIC_LAYERS:
+		_music_layers.append(Sfx.attach_loop(key, self, MUSIC_SILENT_DB, false))
+
+	Sfx.attach_loop("amb_refinery", self, -4.0, false)
+	Sfx.attach_loop("amb_machines", self, -12.0, false)
+	Sfx.attach_loop("amb_insects", self, -14.0, false)
+
+
+## Boucle gérée par le flux lui-même, sans trou entre deux tours : la relance
+## par « finished » d'attach_loop ferait dériver les couches les unes des autres.
+func _make_native_loop(key: String) -> void:
+	var s: AudioStreamWAV = Sfx.sounds.get(key) as AudioStreamWAV
+	if s == null or s.loop_mode == AudioStreamWAV.LOOP_FORWARD:
+		return
+	s.loop_begin = 0
+	s.loop_end = int(round(s.get_length() * s.mix_rate))
+	s.loop_mode = AudioStreamWAV.LOOP_FORWARD
+
+
+## Combat : les couches de rythme entrent l'une après l'autre (pouls, course,
+## assaut). Salle vidée : elles s'effacent toutes, la musique continue seule.
+func _set_combat_music(on: bool) -> void:
+	if on == _in_combat:
+		return   # déjà dans le bon état (ex. réapparition dans une salle en combat)
+	_in_combat = on
+
+	if _music_tween != null and _music_tween.is_valid():
+		_music_tween.kill()
+	_music_tween = create_tween().set_parallel(true)
+
+	var count: int = 0
+	for i in _music_layers.size():
+		var p: Node = _music_layers[i]
+		if not is_instance_valid(p):
+			continue
+		if on:
+			var db: float = music_layer_db[i] if i < music_layer_db.size() else -6.0
+			var delay: float = music_layer_delay[i] if i < music_layer_delay.size() else 0.0
+			_fade_loop(p, db, music_layer_fade_in, delay)
+		else:
+			_fade_loop(p, MUSIC_SILENT_DB, music_fade_time)
+		count += 1
+	if count == 0:
+		_music_tween.kill()   # un tween sans étape lève une erreur
+
+
+func _fade_loop(p: Node, to_db: float, duration: float, delay: float = 0.0) -> void:
+	var from_db: float = float(p.get_meta("base_db", 0.0))
+	_music_tween.tween_method(_set_loop_db.bind(p), from_db, to_db, duration).set_delay(delay)
+
+
+## Passe par base_db pour que le réglage de volume global reste respecté.
+## p en Variant : la boucle a pu être libérée pendant le fondu.
+func _set_loop_db(db: float, p: Variant) -> void:
+	if is_instance_valid(p):
+		p.set_meta("base_db", db)
+		p.set("volume_db", Sfx.master_volume_db + db)
+
+
 # ---------------------------------------------------------------- CONSTRUCTION
 
 ## Lit la carte texte. Renvoie { "rooms": {Vector2i: lettre},
@@ -191,6 +283,8 @@ static func parse_map(text: String) -> Dictionary:
 				continue
 			var even_r: bool = r % 2 == 0
 			var even_c: bool = c % 2 == 0
+			# Grille 2n+1 : la moitié entière d'un indice donne la case. Voulu.
+			@warning_ignore_start("integer_division")
 			if even_r and even_c:
 				room_chars[Vector2i(c / 2, r / 2)] = ch
 				continue
@@ -204,6 +298,7 @@ static func parse_map(text: String) -> Dictionary:
 				b = Vector2i(c / 2, (r + 1) / 2)
 			else:
 				continue
+			@warning_ignore_restore("integer_division")
 			if ch in OPEN_CHARS:
 				links.append([a, b, false])
 			elif ch in LOCKED_CHARS:
@@ -266,7 +361,14 @@ func get_model() -> Dictionary:
 			cells[cell] = layout_rooms[cell]
 		for key in layout_doors:
 			var k: Vector4i = key
-			links.append([Vector2i(k.x, k.y), Vector2i(k.z, k.w), layout_doors[key] == DOOR_LOCKED])
+			var v: int = layout_doors[key]
+			# 4e élément : salle de la dalle d'une grille à sens unique (ou null)
+			var plate_cell: Variant = null
+			if v == DOOR_ONEWAY_A:
+				plate_cell = Vector2i(k.x, k.y)
+			elif v == DOOR_ONEWAY_B:
+				plate_cell = Vector2i(k.z, k.w)
+			links.append([Vector2i(k.x, k.y), Vector2i(k.z, k.w), v == DOOR_LOCKED, plate_cell])
 		start = start_cell if cells.has(start_cell) else cells.keys()[0]
 	else:
 		var parsed: Dictionary = parse_map(map)
@@ -358,11 +460,18 @@ func _build() -> void:
 		door.ledge_height = (_rooms.values()[0] as DungeonRoom).ledge_height if not _rooms.is_empty() else 0.8
 		door.depth = wall_thickness
 		door.state = DungeonDoor.DoorState.LOCKED if l[2] else DungeonDoor.DoorState.OPEN
+		if l.size() > 3 and l[3] != null:
+			door.one_way = true
+			door.plate_cell = l[3]
+			door.state = DungeonDoor.DoorState.CLOSED
 		door.position = (_cell_to_local(a) + _cell_to_local(b)) * 0.5
 		add_child(door)
 		door.build()
 		(_rooms[a] as DungeonRoom).add_veil_piece(door.half_a)
 		(_rooms[b] as DungeonRoom).add_veil_piece(door.half_b)
+		if door.plate != null:
+			(_rooms[door.plate_cell] as DungeonRoom).add_veil_piece(door.plate)
+		door.plate_pressed.connect(_on_door_plate_pressed)
 		door.player_entered.connect(_on_door_entered)
 		door.unlock_requested.connect(_on_door_unlock_requested)
 		door.has_key = keys > 0
@@ -441,6 +550,7 @@ func _snap_to(cell: Vector2i) -> void:
 
 func _activate(room: DungeonRoom) -> void:
 	var alive: int = room.activate(player.global_position)
+	_set_combat_music(alive > 0)
 	# Toute salle où il y a un combat enferme le joueur jusqu'à la fin des
 	# vagues. Les portes à clé, elles, restent simplement verrouillées.
 	if alive > 0:
@@ -481,8 +591,22 @@ func _on_door_entered(door: DungeonDoor) -> void:
 			# sur « interact » devant (voir _on_door_unlock_requested).
 			if keys <= 0:
 				door.deny()
+		DungeonDoor.DoorState.CLOSED:
+			# Grille à sens unique : elle ne s'ouvre que par sa dalle
+			if door.is_one_way_shut():
+				door.deny()
 		DungeonDoor.DoorState.OPEN:
 			_transition(door)
+
+
+## Dalle d'une grille à sens unique : la grille s'ouvre pour de bon. Si un
+## combat enferme la salle, elle attend la fin des vagues comme les autres.
+func _on_door_plate_pressed(door: DungeonDoor) -> void:
+	for d in _closed:
+		if d.connects(_current):
+			_closed.append(door)
+			return
+	door.open()
 
 
 ## Le joueur a appuyé devant une porte verrouillée.
@@ -569,6 +693,7 @@ func _on_room_cleared(room: DungeonRoom) -> void:
 	if room.cell == _current:
 		_play_clear_feedback()
 		_reopen_closed()
+		_set_combat_music(false)
 
 
 ## Ralenti + secousse sur le dernier ennemi : marque la fin du combat.

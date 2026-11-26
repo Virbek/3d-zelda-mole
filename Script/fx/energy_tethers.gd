@@ -21,9 +21,13 @@ class_name EnergyTethers
 @export var halo_width: float = 0.06
 @export var core_color := Color(1.0, 0.62, 0.25, 1.0)
 @export var halo_color := Color(1.0, 0.32, 0.04, 0.6)
-@export var max_length: float = 3.0       ## au-delà (ragdoll, téléport), le filament se coupe
+## Longueur au-delà de laquelle le filament se coupe. 0 = jamais : le lien
+## reste visible même quand un gantelet part loin. (Le ragdoll masque déjà
+## les filaments via le rig.)
+@export var max_length: float = 0.0
 
-## [Callable début, Callable fin, PackedVector3Array décalages courants]
+## [Callable début, Callable fin, PackedVector3Array décalages courants,
+##  Vector3 courbure (décalage monde au milieu de l'arc)]
 var _links: Array = []
 var _im := ImmediateMesh.new()
 var _crackle_t: float = 0.0
@@ -50,7 +54,14 @@ func _ready() -> void:
 func add_link(from: Callable, to: Callable) -> void:
 	var offsets := PackedVector3Array()
 	offsets.resize(segments + 1)
-	_links.append([from, to, offsets])
+	_links.append([from, to, offsets, Vector3.ZERO])
+
+
+## Courbe le filament d'indice `index` en arc : `bow` est le décalage (monde)
+## de son milieu, nul aux extrémités. Vector3.ZERO = filament tendu.
+func set_bow(index: int, bow: Vector3) -> void:
+	if index >= 0 and index < _links.size():
+		_links[index][3] = bow
 
 
 func _process(delta: float) -> void:
@@ -64,19 +75,30 @@ func _process(delta: float) -> void:
 	if cam == null or _links.is_empty() or not is_visible_in_tree():
 		return
 
-	_im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	# On calcule d'abord les arcs visibles : une surface ouverte sans aucun
+	# sommet (filaments tous coupés, ex. pendant une téléportation) est une
+	# erreur pour ImmediateMesh.
+	var arcs: Array[PackedVector3Array] = []
 	for link in _links:
 		var a: Vector3 = (link[0] as Callable).call()
 		var b: Vector3 = (link[1] as Callable).call()
-		if a.distance_to(b) > max_length or a.distance_to(b) < 0.02:
+		var d: float = a.distance_to(b)
+		if (max_length > 0.0 and d > max_length) or d < 0.02:
 			continue
 		var offsets: PackedVector3Array = link[2]
+		var bow: Vector3 = link[3]
 		if reroll:
 			_reroll(offsets, a, b)
 		var pts := PackedVector3Array()
 		for i in segments + 1:
 			var t: float = float(i) / float(segments)
-			pts.append(a.lerp(b, t) + offsets[i])
+			pts.append(a.lerp(b, t) + offsets[i] + bow * sin(t * PI))
+		arcs.append(pts)
+	if arcs.is_empty():
+		return
+
+	_im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	for pts in arcs:
 		_ribbon(pts, cam.global_position, halo_width, halo_color)
 		_ribbon(pts, cam.global_position, core_width, core_color)
 	_im.surface_end()

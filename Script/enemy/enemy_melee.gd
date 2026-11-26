@@ -69,13 +69,15 @@ signal died
 @export var death_launch: float = 1.6
 
 @export_group("Étourdissement")
-@export var stun_duration: float = 3.0
+@export var stun_duration: float = 1.0
 @export var stun_color := Color(0.25, 1.0, 0.35)
 @export var stun_wobble: float = 0.12
 @export var stun_hits_required: int = 4
 @export var stun_drain_delay: float = 0.6
 @export var stun_drain_rate: float = 0.8
 @export var reaction: String = "finisher"   ## ce que déclenche la commande réaction une fois étourdi
+## PV rendus au joueur quand l'attaque réaction le touche étourdi (0 = aucun)
+@export var reaction_heal: int = 1
 
 var player: CharacterBody3D = null
 @onready var mesh: MeshInstance3D = $MeshInstance3D
@@ -251,6 +253,11 @@ func _chase(delta: float) -> void:
 
 	var dir: Vector3 = _dir_to_player()
 
+	# Prêt et proche : il prend sa place dans la file d'attente. Il attend
+	# son tour en tournant autour du joueur (voir AttackToken).
+	if _cooldown <= 0.0 and d < circle_distance + 2.0:
+		AttackToken.enqueue(self)
+
 	var can_attack: bool = _cooldown <= 0.0 and AttackToken.is_available(self)
 
 	if d <= attack_range and can_attack and AttackToken.request(self):
@@ -274,7 +281,10 @@ func _chase(delta: float) -> void:
 func _circle(delta: float, d: float) -> void:
 	var to_player: Vector3 = _dir_to_player()
 	var tangent: Vector3 = to_player.cross(Vector3.UP) * _circle_dir
-	var radial: float = (d - circle_distance) * 0.8
+	# Plus il est loin dans la file, plus il tourne large : les ennemis en
+	# attente s'étagent au lieu de s'agglutiner sur le même cercle.
+	var ring: float = circle_distance + 0.6 * float(clampi(AttackToken.queue_index(self), 0, 3))
+	var radial: float = (d - ring) * 0.8
 	var move: Vector3 = (tangent + to_player * radial).normalized()
 
 	velocity.x = move_toward(velocity.x, move.x * circle_speed, accel * delta)
@@ -302,6 +312,7 @@ func _windup(delta: float) -> void:
 		mesh.scale = _base_scale
 		_hit_player = false
 		attack_box.monitoring = true
+		Sfx.play("beetle_snap", global_position)
 		_set_state(State.STRIKE)
 
 
@@ -402,6 +413,7 @@ func _face(dir: Vector3, delta: float) -> void:
 func _start_windup() -> void:
 	_strike_dir = _dir_to_player()
 	_set_state(State.WINDUP)
+	Sfx.play("beetle_windup", global_position, -4.0)
 
 	if _tele_tween != null and _tele_tween.is_running():
 		_tele_tween.kill()
@@ -448,9 +460,15 @@ func _kill_tweens() -> void:
 
 ## damage a une valeur par défaut : les coups normaux appellent take_hit(dir),
 ## le dash chargé passe ses propres dégâts.
-func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
+func take_hit(direction: Vector3, damage: int = damage_per_hit, breaks_stun: bool = false) -> void:
 	if state == State.DEAD:
 		return
+
+	# Attaque réaction réussie sur lui : le joueur regagne de la vie. Testé
+	# avant les dégâts pour compter aussi quand le coup l'achève.
+	if state == State.STUNNED and breaks_stun and reaction_heal > 0 \
+			and player != null and player.has_method("heal"):
+		player.heal(reaction_heal)
 
 	health -= damage
 	health_bar.set_ratio(float(health) / float(max_health))
@@ -462,10 +480,9 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 	# Recul visible : plus marqué pour un coup lourd
 	_hit_react.play(direction, clampf(float(damage) / float(maxi(damage_per_hit, 1)), 1.0, 2.0))
 
-	# Le joueur appelle add_stun AVANT take_hit : le coup qui vient de remplir
-	# la jauge ne doit pas annuler l'étourdissement qu'il a lui-même déclenché.
-	# Tout coup suivant, lui, réveille l'ennemi (il passe en HURT ci-dessous).
-	if state == State.STUNNED and Engine.get_physics_frames() == _stun_frame:
+	# Étourdi, il encaisse sans se réveiller : seule l'attaque réaction
+	# (finisher / toupie, breaks_stun = true) met fin à l'étourdissement.
+	if state == State.STUNNED and not breaks_stun:
 		return
 
 	# Un coup pendant l'armement l'annule : c'est la récompense du joueur

@@ -131,6 +131,7 @@ func _chase(delta: float) -> void:
 		return
 
 	if d <= trigger_range:
+		Sfx.play("bomber_fuse", global_position)
 		_set_state(State.PRIMED)
 		return
 
@@ -212,7 +213,7 @@ func _face(dir: Vector3, delta: float) -> void:
 
 # ---------------------------------------------------------------- DÉGÂTS
 
-func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
+func take_hit(direction: Vector3, damage: int = damage_per_hit, _breaks_stun: bool = false) -> void:
 	if state == State.DEAD or state == State.PRIMED:
 		return
 
@@ -236,7 +237,7 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 
 ## Étourdir un kamikaze le désamorce temporairement : c'est la seule façon
 ## de le neutraliser sans déclencher son explosion.
-func stun(duration: float) -> void:
+func stun(_duration: float) -> void:
 	pass
 
 
@@ -252,7 +253,7 @@ func is_threatening() -> bool:
 
 ## Mort par les coups du joueur : il explose quand même. C'est tout l'intérêt
 ## de l'ennemi — le tuer ne suffit pas, il faut le tuer AU BON ENDROIT.
-func _die(direction: Vector3) -> void:
+func _die(_direction: Vector3) -> void:
 	if _hit_react != null:
 		_hit_react.stop()
 	_explode()

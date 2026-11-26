@@ -11,8 +11,8 @@ extends CharacterBody3D
 
 
 @export_group("Esquive")
-@export var iframe_start: float = 0.05    ## délai avant que l'invincibilité s'active
-@export var iframe_duration: float = 0.25 ## durée de l'invincibilité
+## Invincible et traverse les ennemis de l'appui sur la touche jusqu'à la
+## fin du dash : esquiver À TRAVERS un ennemi est toujours une option sûre.
 @export var dodge_speed: float = 16.0
 @export var dodge_distance: float = 3.2
 @export var dodge_duration: float = 0.26
@@ -57,7 +57,7 @@ var is_invulnerable: bool = false
 var _dodge_t: float = 0.0
 var _dodge_dir := Vector3.ZERO
 var _dodge_cd: float = 0.0
-var _iframe_t: float = 0.0
+var _ghosted: Array[PhysicsBody3D] = []   ## ennemis traversables pendant le dash
 
 var health: int
 var _hurt_t: float = 0.0
@@ -68,11 +68,15 @@ var _recover_progress: float = 0.0
 var _recover_idle_t: float = 0.0
 
 var _ghosts: DodgeGhosts = null
+var _base_max_health: int = 0   ## max_health de l'inspecteur, sans les piles d'énergie
 
 func _ready() -> void:
 	add_to_group("player")
 	if Checkpoints.has_checkpoint:
 		global_position = Checkpoints.position
+	_base_max_health = max_health
+	max_health = _base_max_health + Inventory.bonus_max_health()
+	Inventory.changed.connect(_on_inventory_changed)
 	health = max_health
 	health_changed.emit(health, max_health)
 
@@ -115,13 +119,19 @@ func _physics_process(delta: float) -> void:
 	if _dodge_cd > 0.0:
 		_dodge_cd = maxf(_dodge_cd - delta, 0.0)
 
+	# Fin du dash, quelle qu'en soit la cause (porte, coffre, toupie…) :
+	# on redevient solide pour les ennemis.
+	if not is_dodging and not _ghosted.is_empty():
+		_set_ghost(false)
+
 	if controls_enabled and Input.is_action_just_pressed("dodge") and not is_dodging and _dodge_cd <= 0.0 \
 			and not combat.is_movement_locked:
 		# L'esquive interrompt la toupie au lieu d'attendre sa fin
 		combat.cancel_spin()
 		is_dodging = true
-		_iframe_t = 0.0
-		is_invulnerable = false
+		Sfx.play_ui("player_dodge", -4.0)
+		is_invulnerable = true
+		_set_ghost(true)
 		_dodge_t = 0.0
 		_dodge_cd = dodge_duration + dodge_cooldown
 		# Sans input directionnel : pas en arrière
@@ -133,9 +143,7 @@ func _physics_process(delta: float) -> void:
 	# --- Esquive : exécution (court-circuite le déplacement normal) ---
 	if is_dodging and not combat.is_spinning:
 		_dodge_t += delta / dodge_duration
-		_iframe_t += delta
-		is_invulnerable = _iframe_t >= iframe_start \
-			and _iframe_t < iframe_start + iframe_duration
+		is_invulnerable = true
 
 		# Tient la vitesse puis coupe net
 		var e: float = 1.0 - pow(_dodge_t, 3.0)
@@ -155,6 +163,7 @@ func _physics_process(delta: float) -> void:
 		if _dodge_t >= 1.0:
 			is_dodging = false
 			is_invulnerable = false
+			_set_ghost(false)
 		return
 	else:
 		# Invincible pendant le coup lourd : le joueur y est immobile et
@@ -253,6 +262,25 @@ func stop_auto_walk() -> void:
 	_auto_dir = Vector3.ZERO
 
 
+## Rend le joueur et les ennemis mutuellement traversables (dans les deux
+## sens : sinon un ennemi qui avance pousserait encore le joueur).
+func _set_ghost(on: bool) -> void:
+	for b in _ghosted:
+		if is_instance_valid(b):
+			remove_collision_exception_with(b)
+			b.remove_collision_exception_with(self)
+	_ghosted.clear()
+	if not on:
+		return
+	for e in get_tree().get_nodes_in_group("enemy"):
+		var b := e as PhysicsBody3D
+		if b == null or not is_instance_valid(b):
+			continue
+		add_collision_exception_with(b)
+		b.add_collision_exception_with(self)
+		_ghosted.append(b)
+
+
 func _apply_gravity(delta: float) -> void:
 	if is_on_floor():
 		velocity.y = 0.0
@@ -286,11 +314,24 @@ func take_damage(amount: int, direction: Vector3) -> void:
 	if health <= 0:
 		_die()
 
+## Une pile d'énergie complète (4 fragments) : une cellule de vie en plus,
+## livrée pleine.
+func _on_inventory_changed() -> void:
+	var new_max: int = _base_max_health + Inventory.bonus_max_health()
+	if new_max <= max_health:
+		return
+	health += new_max - max_health
+	max_health = new_max
+	health_changed.emit(health, max_health)
+	Sfx.play_ui("heal", -4.0)
+
+
 func heal(amount: int) -> void:
 	if _dead:
 		return
 	health = mini(health + amount, max_health)
 	health_changed.emit(health, max_health)
+	Sfx.play_ui("heal", -4.0)
 
 	_recover_progress = 0.0
 	_recover_idle_t = 0.0
@@ -311,12 +352,14 @@ func add_recover_hit(amount: float = 1.0) -> void:
 		_recover_progress = 0.0
 		health = mini(health + 1, max_health)
 		health_changed.emit(health, max_health)
+		Sfx.play_ui("heal", -4.0)
 		recover_changed.emit(0.0, recover_hits_required)
 
 
 func _die() -> void:
 	_dead = true
 	_ghosts.active = false
+	Sfx.play_ui("player_death")
 	died.emit()
 	rig.visible = true
 	set_physics_process(false)

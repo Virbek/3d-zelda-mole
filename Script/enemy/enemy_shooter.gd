@@ -10,7 +10,7 @@ extends CharacterBody3D
 ## Il vise la HurtBox du torse plutôt que la capsule du joueur : il tire donc
 ## là où le joueur se voit, et les esquives deviennent lisibles.
 
-enum State { IDLE, REPOSITION, AIM, SHOOT, RECOVER, HURT, STUNNED, DEAD }
+enum State { IDLE, REPOSITION, AIM, SHOOT, RECOVER, HURT, STUNNED, DEAD, GRABBED }
 
 signal died
 
@@ -72,13 +72,16 @@ signal died
 @export var death_launch: float = 1.6
 
 @export_group("Étourdissement")
-@export var stun_duration: float = 3.0
+@export var stun_duration: float = 1.0
 @export var stun_color := Color(0.25, 1.0, 0.35)
 @export var stun_wobble: float = 0.12   ## amplitude du vacillement
 @export var stun_hits_required: int = 4     ## nombre de coups pour étourdir
 @export var stun_drain_delay: float = 0.6   ## temps sans coup avant que la jauge commence à redescendre
 @export var stun_drain_rate: float = 0.8    ## coups perdus par seconde, une fois la latence passée
-@export var reaction: String = "spin"       ## ce que déclenche la commande réaction une fois étourdi
+## Ce que déclenche la commande réaction une fois étourdi. "slam" : le joueur
+## l'attrape, la fracasse au sol et elle éclate en dards autour de lui.
+## ("spin" reste disponible si on veut revenir à la toupie.)
+@export var reaction: String = "slam"
 
 var player: CharacterBody3D = null
 @onready var mesh: MeshInstance3D = $MeshInstance3D
@@ -90,12 +93,14 @@ var state: State = State.IDLE
 var health: int
 
 var _t: float = 0.0
+var _buzz: Node = null    ## bourdonnement d'ailes en boucle
 var _cooldown: float = 0.0
 var _knockback := Vector3.ZERO
 var _strafe_dir: float = 1.0
 var _stun_bar: float = 0.0
 var _stun_idle_t: float = 0.0
 var _stun_frame: int = -1             ## frame physique où l'étourdissement a commencé
+var _saved_layers := Vector3i.ZERO    ## corps (calque, masque) et HurtBox (calque) pendant la saisie
 var _player_hurt: Area3D = null
 
 var _mat: StandardMaterial3D
@@ -120,6 +125,7 @@ func _ready() -> void:
 		return
 	add_to_group("enemy")
 	health = max_health
+	_buzz = Sfx.attach_loop("hornet_buzz", self, -10.0)
 	_base_scale = mesh.scale
 	_hit_react = HitReaction.attach(mesh)
 	_stun_base_y = mesh.position.y
@@ -172,8 +178,8 @@ func _physics_process(delta: float) -> void:
 			_hurt(delta)
 		State.STUNNED:
 			_stunned()
-		State.DEAD:
-			return
+		State.DEAD, State.GRABBED:
+			return   # saisi : c'est le joueur qui le déplace
 
 	_apply_gravity(delta)
 	move_and_slide()
@@ -333,7 +339,7 @@ func _shoot() -> void:
 		p.direction = dir
 		p.speed = projectile_speed
 		p.shooter = self
-		Sfx.play("shoot", global_position)
+		Sfx.play("hornet_shoot", global_position)
 
 	_cooldown = shoot_cooldown
 	_set_state(State.RECOVER)
@@ -449,7 +455,7 @@ func _start_aim() -> void:
 
 ## damage a une valeur par défaut : les coups normaux appellent take_hit(dir),
 ## le dash chargé passe ses propres dégâts.
-func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
+func take_hit(direction: Vector3, damage: int = damage_per_hit, breaks_stun: bool = false) -> void:
 	if state == State.DEAD:
 		return
 
@@ -463,10 +469,9 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 	# Recul visible : plus marqué pour un coup lourd
 	_hit_react.play(direction, clampf(float(damage) / float(maxi(damage_per_hit, 1)), 1.0, 2.0))
 
-	# Le joueur appelle add_stun AVANT take_hit : le coup qui vient de remplir
-	# la jauge ne doit pas annuler l'étourdissement qu'il a lui-même déclenché.
-	# Tout coup suivant, lui, réveille l'ennemi (il passe en HURT ci-dessous).
-	if state == State.STUNNED and Engine.get_physics_frames() == _stun_frame:
+	# Étourdi, il encaisse sans se réveiller : seule l'attaque réaction
+	# (finisher / toupie, breaks_stun = true) met fin à l'étourdissement.
+	if state == State.STUNNED and not breaks_stun:
 		return
 
 	mesh.scale = _base_scale
@@ -499,6 +504,8 @@ func _die(direction: Vector3) -> void:
 	if _hit_react != null:
 		_hit_react.stop()
 	Sfx.play("enemy_death", global_position)
+	Sfx.stop_loop(_buzz)
+	_buzz = null
 	_set_state(State.DEAD)
 	died.emit()
 	hurt_box.monitorable = false
@@ -563,6 +570,35 @@ func stun(duration: float) -> void:
 		_flash_tween.kill()
 	_mat.albedo_color = stun_color
 	stun_duration = duration
+
+
+## Le joueur l'attrape (réaction "slam"). Il ne bouge plus, ne collisionne
+## plus et ne peut plus être frappé : c'est Combat qui le transporte.
+func begin_grab() -> bool:
+	if state != State.STUNNED:
+		return false
+	_saved_layers = Vector3i(collision_layer, collision_mask, hurt_box.collision_layer)
+	collision_layer = 0
+	collision_mask = 0
+	hurt_box.collision_layer = 0
+	velocity = Vector3.ZERO
+	mesh.position.y = _stun_base_y
+	mesh.rotation.z = 0.0
+	_mat.albedo_color = stun_color
+	_set_state(State.GRABBED)
+	return true
+
+
+## Relâché (juste avant l'impact) : il redevient un ennemi normal. Le coup
+## qui suit décide s'il meurt ou s'il est sonné.
+func end_grab() -> void:
+	if state != State.GRABBED:
+		return
+	collision_layer = _saved_layers.x
+	collision_mask = _saved_layers.y
+	hurt_box.collision_layer = _saved_layers.z
+	_mat.albedo_color = _base_color
+	_set_state(State.REPOSITION)
 
 
 func is_stunned() -> bool:

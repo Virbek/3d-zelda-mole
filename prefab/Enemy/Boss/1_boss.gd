@@ -3,10 +3,10 @@ extends CharacterBody3D
 ## Boss sauteur. Il bondit vers le joueur, reste suspendu pendant qu'une zone
 ## se remplit au sol, puis s'abat pile quand elle est pleine.
 ##
-## LE CŒUR DU COMBAT : la zone SUIT le joueur pendant les 75 premiers pour cent
-## du remplissage, puis se verrouille. Fuir tôt ne sert donc à rien — il faut
-## attendre le verrouillage et sortir dans le dernier quart. C'est ce qui rend
-## le combat lisible sans être un simple test de réflexes.
+## LE CŒUR DU COMBAT : en l'air, il POURSUIT le joueur avec un temps de retard,
+## et la zone au sol est son ombre. Au verrouillage (75 % du remplissage) il
+## se fige puis s'abat. Rester immobile = se faire écraser ; garder du
+## mouvement = le voir tomber juste derrière soi.
 ##
 ## ESCALADE : à chaque tiers de vie perdu, il enchaîne un saut de plus avant
 ## de se reposer. La règle ne change jamais, seule la densité augmente — le
@@ -38,6 +38,13 @@ signal phase_changed(phase: int)
 @export var land_time: float = 0.45       ## temps au sol après l'impact
 @export var rest_time: float = 1.8        ## respiration entre deux séries
 
+@export_group("Poursuite aérienne")
+## Réactivité de la poursuite : plus c'est haut, moins il a de retard.
+@export var chase_rate: float = 2.5
+## Vitesse horizontale max en l'air. Entre la marche (6) et le sprint (10)
+## du joueur : marcher ne suffit pas à le semer, sprinter oui.
+@export var chase_max_speed: float = 8.5
+
 @export_group("Zone d'impact")
 @export var blast_radius: float = 3.4
 @export var blast_fuse: float = 1.5       ## durée du remplissage
@@ -58,6 +65,9 @@ signal phase_changed(phase: int)
 
 @export_group("Mort")
 @export var death_time: float = 1.2
+
+@export_group("Apparence")
+@export var use_robot_model: bool = true   ## remplace la capsule par le robot « poings-blocs »
 
 @onready var mesh: MeshInstance3D = $MeshInstance3D
 @onready var hurt_box: Area3D = $HurtBox
@@ -83,6 +93,7 @@ var _base_color: Color
 var _base_scale := Vector3.ONE
 var _hit_react: HitReaction = null
 var _flash_tween: Tween
+var _model: BossRobotModel = null
 
 
 func _ready() -> void:
@@ -109,6 +120,16 @@ func _ready() -> void:
 	_mat = base.duplicate() if base != null else StandardMaterial3D.new()
 	mesh.material_override = _mat
 	_base_color = _mat.albedo_color
+
+	# Le robot est rangé sous le mesh : il hérite de l'écrasement, du recul
+	# et de l'aplatissement à la mort. Cotes en mètres : on annule l'échelle
+	# du mesh, et on pose ses pieds sur le bas de la capsule.
+	if use_robot_model:
+		_model = BossRobotModel.new()
+		mesh.add_child(_model)
+		_model.scale = Vector3.ONE / maxf(mesh.scale.y, 0.001)
+		_model.position.y = _mesh_local_bottom
+		mesh.mesh = null
 
 	health_changed.emit(health, max_health)
 	phase_changed.emit(_phase)
@@ -138,6 +159,34 @@ func _physics_process(delta: float) -> void:
 			return
 
 
+## Visuel uniquement : pose des bras, yeux, couleurs de coup.
+func _process(delta: float) -> void:
+	if _model == null:
+		return
+	_model.set_tint(_mat.albedo_color, _base_color)
+	var pose: String = "rest"
+	var k: float = 0.0
+	match state:
+		State.WINDUP:
+			pose = "windup"
+			k = _t / maxf(windup_time, 0.01)
+		State.AIRBORNE:
+			var fall_start: float = maxf(blast_fuse - fall_time, rise_time)
+			if _t < rise_time:
+				pose = "rise"
+			elif _t < fall_start:
+				pose = "hover"
+			else:
+				pose = "fall"
+				k = (_t - fall_start) / maxf(fall_time, 0.01)
+		State.LANDED:
+			pose = "landed"
+			k = _t / maxf(land_time, 0.01)
+		State.DEAD:
+			pose = "dead"
+	_model.drive(pose, k, delta)
+
+
 func _set_state(next: State) -> void:
 	state = next
 	_t = 0.0
@@ -153,6 +202,7 @@ func _idle() -> void:
 
 func _start_jump() -> void:
 	_set_state(State.WINDUP)
+	Sfx.play("boss_windup", global_position)
 	_face_player()
 
 	if _flash_tween != null and _flash_tween.is_running():
@@ -181,13 +231,23 @@ func _launch() -> void:
 
 	_spawn_zone()
 	_set_state(State.AIRBORNE)
+	Sfx.play("boss_jump", global_position, 2.0)
 
 
 ## Il monte, plane, puis s'abat quand la zone est pleine. La durée totale
 ## en l'air est calée sur le remplissage : les deux se terminent ensemble.
-func _airborne(_delta: float) -> void:
+##
+## Pendant toute la phase aérienne (montée comprise) il POURSUIT le joueur,
+## avec toujours un temps de retard. La zone au sol est son ombre : elle
+## le suit, lui, pas le joueur. Un joueur qui s'arrête se fait rattraper et
+## écraser ; un joueur qui garde du mouvement le voit tomber juste derrière.
+func _airborne(delta: float) -> void:
 	var total: float = blast_fuse
 	var fall_start: float = maxf(total - fall_time, rise_time)
+	var locked: bool = _zone == null or not is_instance_valid(_zone) or _zone.is_locked()
+
+	if _t < fall_start and not locked:
+		_chase_player(delta)
 
 	if _t < rise_time:
 		# Montée : ralentit en approchant du sommet
@@ -197,15 +257,12 @@ func _airborne(_delta: float) -> void:
 		_set_mesh_scale(_base_scale * Vector3(0.85, 1.25, 0.85))
 
 	elif _t < fall_start:
-		# Suspension : il flotte pendant que le joueur lit la zone
+		# Suspension : il plane en poursuivant, puis se fige au verrouillage
 		global_position.y = _ground_y + hover_height
 		_set_mesh_scale(_base_scale)
-
-		# Tant que la zone n'est pas verrouillée, il se place au-dessus d'elle
-		if _zone != null and is_instance_valid(_zone) and not _zone.is_locked():
+		_face_player()
+		if _zone != null and is_instance_valid(_zone):
 			_land_pos = _zone.global_position
-			global_position.x = _land_pos.x
-			global_position.z = _land_pos.z
 
 	else:
 		# Chute : brutale, sur la position verrouillée
@@ -276,11 +333,24 @@ func _spawn_zone() -> void:
 
 	_zone = blast_scene.instantiate()
 	get_tree().current_scene.add_child(_zone)
-	_zone.global_position = Vector3(player.global_position.x, _ground_y + 0.02, player.global_position.z)
+	_zone.global_position = Vector3(global_position.x, _ground_y + 0.02, global_position.z)
 
-	# La zone se configure elle-même ; le boss ne fait que lui dire qui suivre
+	# La zone est l'ombre du boss : elle suit le boss, pas le joueur. C'est
+	# donc le retard du boss qui décide où il tombe.
 	if _zone.has_method("setup_follow"):
-		_zone.setup_follow(player, blast_fuse, blast_lock, blast_radius, blast_damage)
+		_zone.setup_follow(self, blast_fuse, blast_lock, blast_radius, blast_damage)
+
+
+## Poursuite amortie : il vise le joueur mais n'y arrive jamais d'un coup.
+## L'amortissement exponentiel crée le retard (proportionnel à la vitesse du
+## joueur), le plafond de vitesse empêche les rattrapages instantanés.
+func _chase_player(delta: float) -> void:
+	var pos := Vector3(global_position.x, 0.0, global_position.z)
+	var goal := Vector3(player.global_position.x, 0.0, player.global_position.z)
+	var step: Vector3 = (goal - pos) * (1.0 - exp(-chase_rate * delta))
+	step = step.limit_length(chase_max_speed * delta)
+	global_position.x += step.x
+	global_position.z += step.z
 
 
 # ---------------------------------------------------------------- OUTILS
@@ -353,7 +423,7 @@ func _shake(strength: float) -> void:
 
 ## Intouchable en l'air : sinon le joueur le tue en le regardant monter,
 ## et tout le pattern s'effondre.
-func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
+func take_hit(direction: Vector3, damage: int = damage_per_hit, _breaks_stun: bool = false) -> void:
 	if state == State.DEAD or state == State.AIRBORNE:
 		return
 
@@ -366,6 +436,7 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 
 	# Recul visible : plus marqué pour un coup lourd
 	_hit_react.play(direction, 0.5 * clampf(float(damage) / float(maxi(damage_per_hit, 1)), 1.0, 2.0))
+	Sfx.play("boss_hurt", global_position)
 
 	_flash()
 	_check_phase()
@@ -381,6 +452,7 @@ func _check_phase() -> void:
 
 	_phase = p
 	phase_changed.emit(_phase)
+	Sfx.play("boss_phase", global_position, 3.0)
 
 	# Il repart immédiatement : le passage de palier interrompt la respiration
 	if state == State.REST:
@@ -418,7 +490,8 @@ func _flash() -> void:
 func _die() -> void:
 	if _hit_react != null:
 		_hit_react.stop()
-	Sfx.play("enemy_death", global_position, 4.0)
+	# Repli sur le cri d'ennemi tant que boss_death.wav n'existe pas
+	Sfx.play("boss_death" if Sfx.sounds.has("boss_death") else "enemy_death", global_position, 4.0)
 	_set_state(State.DEAD)
 	died.emit()
 

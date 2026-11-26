@@ -187,7 +187,7 @@ func _visual_wall_height(dir: Vector2i, p: Vector3) -> float:
 
 ## Arête de roche plus sombre sur le dessus d'un tronçon : vue de haut, le
 ## mur a un bord net au lieu d'un aplat uni.
-func _add_wall_cap(wall: MeshInstance3D, size: Vector3, visible_h: float) -> void:
+func _add_wall_cap(wall: MeshInstance3D, size: Vector3, _visible_h: float) -> void:
 	var cap := MeshInstance3D.new()
 	var b := BoxMesh.new()
 	# Débord seulement dans l'épaisseur du mur : dans la longueur, l'arête
@@ -231,7 +231,7 @@ func _build_layout() -> void:
 	var dims: Vector2i = grid_dims()
 	var cols: int = dims.x
 	var rows: int = dims.y
-	var cell := Vector2(room_size.x / float(maxi(cols, 1)), room_size.y / float(maxi(rows, 1)))
+	var cell_size := Vector2(room_size.x / float(maxi(cols, 1)), room_size.y / float(maxi(rows, 1)))
 	var i: int = 0
 	for c in g["cells"]:
 		if c["col"] >= cols or c["row"] >= rows:
@@ -241,8 +241,8 @@ func _build_layout() -> void:
 			"P", "#":
 				# Un pilier remplit sa case : plusieurs P côte à côte font un mur.
 				_pillars.append(pos)
-				_pillar_radius = maxf(cell.x, cell.y) * 0.5
-				var bs := Vector3(cell.x, wall_height, cell.y)
+				_pillar_radius = maxf(cell_size.x, cell_size.y) * 0.5
+				var bs := Vector3(cell_size.x, wall_height, cell_size.y)
 				var bh: float = _pillar_visual_height(pos)
 				var block := _add_box("Block%d" % i, bs, pos + Vector3(0.0, wall_height * 0.5, 0.0), pillar_color, true, bh if bh < wall_height else -1.0)
 				_decorate_pillar(block, bs, bh)
@@ -644,6 +644,7 @@ func _on_enemy_died() -> void:
 	if _wave + 1 < data.waves.size():
 		_next_wave()
 	else:
+		Sfx.play_ui("room_clear")
 		_on_all_dead()
 
 
@@ -690,11 +691,16 @@ func _has_chest() -> bool:
 func _spawn_chest(local_pos: Vector3, animated: bool = false) -> void:
 	_chest = DungeonChest.new()
 	_chest.name = "Chest"
+	_chest.item = data.chest_item   # vide = petite clé
 	add_child(_chest)
 	_chest.position = local_pos
 	_chest.opened.connect(_on_chest_opened)
 	_pieces.append(_chest)
 	_apply_veil(_veil_k)
+	# Objet déjà pris lors d'une vie précédente : le coffre reste ouvert et vide
+	if _chest_persists() and not Engine.is_editor_hint() and Inventory.is_chest_opened(_chest_id()):
+		_chest.set_open_instant()
+		return
 	if animated and not Engine.is_editor_hint():
 		_chest.appear()
 		_push_player_out_of(_chest)
@@ -718,9 +724,23 @@ func _push_player_out_of(chest: DungeonChest) -> void:
 
 ## Le coffre a été ouvert et l'objet présenté : on applique son effet.
 func _on_chest_opened(item: ItemData) -> void:
+	if _chest_persists():
+		Inventory.mark_chest_opened(_chest_id())
 	if item.id == &"key" and not _key_given:
 		_key_given = true
 		_on_key_collected()
+
+
+## Les petites clés se redonnent à chaque rechargement (le donjon repart de
+## zéro) ; tout autre objet n'est donné qu'une fois pour toute la partie.
+func _chest_persists() -> bool:
+	return data.chest_item != null and data.chest_item.category != ItemData.Category.SMALL_KEY
+
+
+func _chest_id() -> String:
+	var scene: Node = get_tree().current_scene
+	var path: String = scene.scene_file_path if scene != null else ""
+	return "%s|%d,%d" % [path, cell.x, cell.y]
 
 
 func _on_key_collected() -> void:

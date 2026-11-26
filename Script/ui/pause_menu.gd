@@ -54,6 +54,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not event.is_action_pressed(ACTION):
 		return
 	if visible:
+		Sfx.play_ui("ui_back")   # ici et pas dans resume() : les boutons jouent déjà ui_confirm
 		resume()
 	elif _can_pause():
 		open()
@@ -74,6 +75,7 @@ func _can_pause() -> bool:
 
 
 func open() -> void:
+	Sfx.play_ui("pause")
 	get_tree().paused = true
 	visible = true
 	_sync_volume()
@@ -165,6 +167,8 @@ func _add_button(parent: Control, text: String, callback: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
 	b.custom_minimum_size = Vector2(260, 44)
+	b.pressed.connect(func() -> void: Sfx.play_ui("ui_confirm"))
 	b.pressed.connect(callback)
+	b.focus_entered.connect(func() -> void: Sfx.play_ui("ui_move", -6.0))
 	parent.add_child(b)
 	return b

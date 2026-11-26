@@ -84,6 +84,7 @@ func _process(delta: float) -> void:
 	if not _fading and _t >= fade_delay:
 		_fading = true
 		_t = 0.0
+		Sfx.play_ui("game_over")
 
 	if _fading:
 		var k: float = clampf(_t / fade_duration, 0.0, 1.0)
@@ -99,6 +100,7 @@ func _process(delta: float) -> void:
 
 
 func _on_retry_pressed() -> void:
+	Sfx.play_ui("ui_confirm")
 	get_tree().reload_current_scene()
 
 

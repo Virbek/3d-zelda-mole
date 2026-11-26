@@ -25,6 +25,9 @@ var outline_width: float = 0.008
 
 ## Pièces qui reçoivent la lueur de charge (voir set_overlay).
 var _parts: Array[MeshInstance3D] = []
+## Pièces visibles seulement poing fermé / seulement main ouverte.
+var _fist_only: Array[Node3D] = []
+var _open_only: Array[Node3D] = []
 
 
 static func create(hand_side: float, outline: float = 0.008) -> Gauntlet:
@@ -43,6 +46,14 @@ func set_overlay(mat: Material) -> void:
 		p.material_overlay = mat
 
 
+## Main ouverte (doigts tendus, paume vers -Y) ou poing fermé.
+func set_open(open: bool) -> void:
+	for n in _fist_only:
+		n.visible = not open
+	for n in _open_only:
+		n.visible = open
+
+
 # ---------------------------------------------------------------- CONSTRUCTION
 
 func _build() -> void:
@@ -58,11 +69,14 @@ func _build() -> void:
 		var x: float = lerpf(-0.09, 0.09, float(i) / 3.0)
 		_box(Vector3(0.055, 0.075, 0.06), Vector3(x, 0.03, -0.17), STEEL)
 	# Doigts repliés sous les jointures
-	_box(Vector3(0.22, 0.06, 0.05), Vector3(0.0, -0.06, -0.165), STEEL_DARK)
+	_fist_only.append(_box(Vector3(0.22, 0.06, 0.05), Vector3(0.0, -0.06, -0.165), STEEL_DARK))
 
 	# --- Pouce, côté intérieur ---
 	var thumb := _box(Vector3(0.07, 0.07, 0.13), Vector3(inner * 0.15, -0.02, -0.08), STEEL)
 	thumb.rotation.y = deg_to_rad(-12.0) * inner
+	_fist_only.append(thumb)
+
+	_build_open_hand(inner)
 
 	# --- Manchette du poignet ---
 	_cylinder(0.125, 0.18, Vector3(0.0, 0.0, 0.11), STEEL_DARK)
@@ -80,6 +94,54 @@ func _build() -> void:
 	_box(Vector3(0.1, 0.025, 0.08), Vector3(0.0, 0.13, 0.13), STEEL_DARK)
 	var screen := _box(Vector3(0.075, 0.012, 0.055), Vector3(0.0, 0.145, 0.13), SCREEN, false)
 	screen.material_override = _screen_material()
+
+
+## Main ouverte : quatre doigts tendus dans le prolongement des jointures,
+## bouts légèrement relevés vers la paume (-Y), pouce écarté, et un petit
+## émetteur cyan au creux de la paume. Cachée par défaut.
+func _build_open_hand(inner: float) -> void:
+	for i in 4:
+		var x: float = lerpf(-0.09, 0.09, float(i) / 3.0)
+		var spread: float = lerpf(-6.0, 6.0, float(i) / 3.0)
+		var flen: float = 0.13 if i == 0 or i == 3 else 0.15
+		var finger := Node3D.new()
+		finger.position = Vector3(x, -0.06, -0.19)
+		finger.rotation.y = deg_to_rad(-spread)
+		add_child(finger)
+		_open_only.append(finger)
+		_box_in(finger, Vector3(0.05, 0.045, flen), Vector3(0.0, 0.0, -flen * 0.5), STEEL_DARK)
+		# Phalange du bout, recourbée vers la paume : main en coupe
+		var tip := Node3D.new()
+		tip.position = Vector3(0.0, 0.0, -flen)
+		tip.rotation.x = deg_to_rad(-35.0)
+		finger.add_child(tip)
+		_box_in(tip, Vector3(0.048, 0.042, 0.07), Vector3(0.0, 0.0, -0.035), STEEL)
+
+	# Pouce écarté vers l'extérieur
+	var thumb := Node3D.new()
+	thumb.position = Vector3(inner * 0.13, -0.03, -0.07)
+	thumb.rotation = Vector3(deg_to_rad(-15.0), deg_to_rad(40.0) * inner, 0.0)
+	add_child(thumb)
+	_open_only.append(thumb)
+	_box_in(thumb, Vector3(0.065, 0.06, 0.15), Vector3(0.0, 0.0, -0.075), STEEL)
+
+	# Émetteur au creux de la paume : la clé « flotte » au-dessus
+	var ring := _cylinder(0.065, 0.02, Vector3(0.0, -0.105, -0.06), STEEL_DARK)
+	ring.rotation = Vector3.ZERO
+	_open_only.append(ring)
+	var core := _cylinder(0.045, 0.012, Vector3(0.0, -0.115, -0.06), SCREEN)
+	core.rotation = Vector3.ZERO
+	core.material_override = _screen_material()
+	_open_only.append(core)
+
+	set_open(false)
+
+
+func _box_in(parent: Node3D, size: Vector3, pos: Vector3, color: Color) -> MeshInstance3D:
+	var m := _box(size, pos, color)
+	remove_child(m)
+	parent.add_child(m)
+	return m
 
 
 func _box(size: Vector3, pos: Vector3, color: Color, outlined: bool = true) -> MeshInstance3D:

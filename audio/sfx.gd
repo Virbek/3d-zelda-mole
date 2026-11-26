@@ -15,7 +15,8 @@ extends Node
 ##   Sfx.play_ui("heal")                 — son non positionné
 
 @export var pool_size: int = 12
-@export var master_volume_db: float = -8.0   ## volume global de tous les sons (−10 dB ≈ perçu deux fois moins fort)
+@export var master_volume_db: float = -8.0:   ## volume global de tous les sons (−10 dB ≈ perçu deux fois moins fort)
+	set = _set_master_volume
 
 ## Variation aléatoire de hauteur, pour que dix coups d'affilée ne soient pas
 ## dix fois exactement le même échantillon — c'est ce qui fatigue l'oreille.
@@ -31,6 +32,7 @@ var sounds: Dictionary = {}
 var _pool_3d: Array[AudioStreamPlayer3D] = []
 var _pool_2d: Array[AudioStreamPlayer] = []
 var _last_played: Dictionary = {}
+var _loops: Array[Node] = []      ## boucles en cours, pour suivre le volume global
 
 
 func _ready() -> void:
@@ -135,3 +137,53 @@ func _free_2d() -> AudioStreamPlayer:
 		if not p.playing:
 			return p
 	return _pool_2d[0] if _pool_2d.size() > 0 else null
+
+
+## Boucle attachée à un nœud (charge du gantelet, bourdonnement, ambiance).
+## Elle vit comme enfant de parent et disparaît avec lui : un frelon mort ne
+## bourdonne plus, et un rechargement de scène ne laisse pas d'ambiance en
+## double. positional = false pour un son d'interface ou d'ambiance.
+## Renvoie le lecteur (à passer à stop_loop), ou null si le son n'existe pas.
+func attach_loop(key: String, parent: Node, volume_db: float = 0.0, positional: bool = true) -> Node:
+	if parent == null or not sounds.has(key):
+		return null
+
+	var p: Node
+	if positional and parent is Node3D:
+		var p3 := AudioStreamPlayer3D.new()
+		p3.unit_size = 30.0
+		p3.max_distance = 0.0
+		p3.stream = sounds[key]
+		p3.volume_db = master_volume_db + volume_db
+		p3.finished.connect(p3.play)   # relance : marche même si le fichier n'est pas importé en boucle
+		p = p3
+	else:
+		var p2 := AudioStreamPlayer.new()
+		p2.stream = sounds[key]
+		p2.volume_db = master_volume_db + volume_db
+		p2.finished.connect(p2.play)
+		p = p2
+
+	p.set_meta("base_db", volume_db)
+	parent.add_child(p)
+	p.call("play")
+	_loops.append(p)
+	return p
+
+
+## p en Variant : la boucle a pu mourir avec son parent, et un nœud libéré
+## refuse d'entrer dans un paramètre typé Node.
+func stop_loop(p: Variant) -> void:
+	if p != null and is_instance_valid(p):
+		_loops.erase(p)
+		p.queue_free()
+
+
+func _set_master_volume(value: float) -> void:
+	master_volume_db = value
+	for i in range(_loops.size() - 1, -1, -1):
+		var n: Variant = _loops[i]   # Variant : un nœud libéré ne passe pas dans une variable typée Node
+		if not is_instance_valid(n):
+			_loops.remove_at(i)
+			continue
+		n.set("volume_db", value + float(n.get_meta("base_db", 0.0)))

@@ -12,11 +12,17 @@ class_name DungeonDoor
 ##
 ## La zone de détection déborde dans les deux salles : sans ça, le joueur
 ## bloqué contre une porte verrouillée n'atteindrait jamais la zone.
+##
+## GRILLE À SENS UNIQUE (raccourci) : une grille toujours fermée. Une dalle
+## de pression est posée au sol d'UN seul côté (plate_cell) ; marcher dessus
+## ouvre la grille pour de bon. Depuis l'autre côté, impossible de passer :
+## il faut faire le tour.
 
 enum DoorState { OPEN, LOCKED, CLOSED }
 
 signal player_entered(door: DungeonDoor)
 signal unlock_requested(door: DungeonDoor)
+signal plate_pressed(door: DungeonDoor)
 
 var cell_a := Vector2i.ZERO
 var cell_b := Vector2i.ZERO
@@ -25,6 +31,17 @@ var width: float = 2.4
 var height: float = 2.8
 var depth: float = 1.0           ## épaisseur du mur traversé
 var state: DoorState = DoorState.OPEN
+
+## Grille à sens unique : salle où se trouve la dalle. Ignoré si one_way est faux.
+var one_way: bool = false
+var plate_cell := Vector2i.ZERO
+var plate_distance: float = 2.2      ## distance de la dalle au mur, dans la salle
+var plate_size: float = 1.3
+## La dalle, à enregistrer sur le voile de sa salle (comme les moitiés de porte).
+var plate: Node3D = null
+var _plate_top: Node3D = null
+var _plate_lamp: MeshInstance3D = null
+var _plate_used: bool = false
 
 var locked_color := Color(0.5, 0.3, 0.12)
 var lock_color := Color(1.0, 0.82, 0.2)
@@ -119,12 +136,96 @@ func build() -> void:
 	add_child(_trigger)
 	_trigger.body_entered.connect(_on_body_entered)
 
+	if one_way:
+		_build_plate()
+
 	if not Engine.is_editor_hint():
 		_prompt = InteractPrompt.new()
 		_prompt.position.y = height + 0.4
 		add_child(_prompt)
 
 	set_state_instant(state)
+
+
+## Dalle de pression au sol, dans la salle plate_cell, face à la porte.
+## Cadre d'acier, plateau rouillé qui s'enfonce, voyant rouge → vert.
+func _build_plate() -> void:
+	var dir := Vector3(plate_cell.x - cell_a.x, 0.0, plate_cell.y - cell_a.y)
+	if plate_cell == cell_a:
+		dir = Vector3(cell_a.x - cell_b.x, 0.0, cell_a.y - cell_b.y)
+	dir = dir.normalized()
+
+	plate = Node3D.new()
+	plate.name = "Plate"
+	plate.position = dir * (depth * 0.5 + plate_distance)
+	add_child(plate)
+
+	var s: float = plate_size
+	# Cadre : quatre bords d'acier
+	var e: float = 0.14
+	for side: Vector3 in [Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 0, -1)]:
+		var along_x: bool = absf(side.z) > 0.5
+		var size := Vector3(s + e * 2.0, 0.1, e) if along_x else Vector3(e, 0.1, s)
+		_plain_box(plate, size, side * (s * 0.5 + e * 0.5) + Vector3.UP * 0.05, ToonBuilder.STEEL_DARK)
+
+	# Plateau mobile, avec bandes de danger
+	_plate_top = Node3D.new()
+	plate.add_child(_plate_top)
+	_plain_box(_plate_top, Vector3(s, 0.1, s), Vector3.UP * 0.07, ToonBuilder.RUST)
+	for i in 3:
+		var off: float = (float(i) - 1.0) * s * 0.3
+		_plain_box(_plate_top, Vector3(s * 0.8, 0.02, 0.1), Vector3(0.0, 0.13, off), ToonBuilder.HAZARD)
+
+	# Voyant au milieu : rouge tant que la grille est fermée
+	_plate_lamp = _plain_box(_plate_top, Vector3(0.22, 0.05, 0.22), Vector3.UP * 0.15, Color(0.9, 0.15, 0.1))
+	var lm := StandardMaterial3D.new()
+	lm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	lm.albedo_color = Color(0.95, 0.2, 0.1)
+	_plate_lamp.material_override = lm
+
+	if Engine.is_editor_hint():
+		return
+	var area := Area3D.new()
+	area.collision_layer = 0
+	area.collision_mask = 1
+	var col := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(s, 1.0, s)
+	col.shape = shape
+	col.position.y = 0.5
+	area.add_child(col)
+	plate.add_child(area)
+	area.body_entered.connect(_on_plate_body_entered)
+
+
+## Boîte alignée sur le monde (la dalle n'a pas d'orientation propre).
+func _plain_box(parent: Node3D, size: Vector3, pos: Vector3, color: Color) -> MeshInstance3D:
+	var m := MeshInstance3D.new()
+	var b := BoxMesh.new()
+	b.size = size
+	m.mesh = b
+	m.position = pos
+	m.material_override = ToonBuilder.toon_material(color, 0.008)
+	parent.add_child(m)
+	return m
+
+
+func _on_plate_body_entered(body: Node3D) -> void:
+	if _plate_used or not body.is_in_group("player"):
+		return
+	_plate_used = true
+	var t := create_tween().set_parallel(true)
+	t.tween_property(_plate_top, "position:y", -0.06, 0.12)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if _plate_lamp != null:
+		(_plate_lamp.material_override as StandardMaterial3D).albedo_color = Color(0.3, 1.0, 0.35)
+	Sfx.play("door_unlock", plate.global_position)
+	plate_pressed.emit(self)
+
+
+## Vrai pour une grille à sens unique que la dalle n'a pas encore ouverte.
+func is_one_way_shut() -> bool:
+	return one_way and not _plate_used
 
 
 ## Une moitié de porte, décalée d'un quart d'épaisseur vers side (la salle
@@ -274,7 +375,11 @@ func set_state_instant(s: DoorState) -> void:
 func open() -> void:
 	if state == DoorState.OPEN:
 		return
+	# Grille (porte de combat) : même « shruuu » qu'à la montée. Porte
+	# blindée verrouillée : le grondement lourd.
+	var sound: String = "door_close" if state == DoorState.CLOSED else "door_open"
 	state = DoorState.OPEN
+	Sfx.play(sound, global_position + Vector3.UP * height * 0.5, -2.0 if sound == "door_close" else 0.0)
 	if _tween != null and _tween.is_running():
 		_tween.kill()
 	_tween = create_tween()
@@ -289,6 +394,7 @@ func close() -> void:
 	if state == DoorState.CLOSED:
 		return
 	state = DoorState.CLOSED
+	Sfx.play("door_close", global_position + Vector3.UP * height * 0.5, -2.0)
 	_apply_look()
 	_col.set_deferred("disabled", false)
 	_blocker.visible = true
@@ -304,6 +410,7 @@ func close() -> void:
 func deny() -> void:
 	if _tween != null and _tween.is_running():
 		return
+	Sfx.play("door_deny", global_position + Vector3.UP * height * 0.5)
 	var axis: String = "position:z" if axis_x else "position:x"
 	_tween = create_tween()
 	for i in 3:

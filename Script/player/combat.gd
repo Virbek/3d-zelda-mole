@@ -6,8 +6,9 @@ extends Node
 ##   - le combo, en boucle 1→2→1→2..., au contact
 ##   - le poing chargé, à distance : le bras part seul ; s'il accroche un
 ##     ennemi, le joueur est propulsé jusqu'à lui pour enchaîner le combo
-##   - la commande réaction, débloquée près d'un ennemi étourdi : toupie ou
-##     coup lourd ciblé (finisher) selon ce que l'ennemi étourdi préfère
+##   - la commande réaction, débloquée près d'un ennemi étourdi : toupie,
+##     coup lourd ciblé (finisher) ou slam (attraper l'abeille, la fracasser
+##     au sol, dards en étoile) selon ce que l'ennemi étourdi préfère
 ##
 ## L'étourdissement n'est plus une chance sur un coup : chaque ennemi a sa
 ## propre jauge, remplie par les coups reçus (voir add_stun sur l'ennemi),
@@ -89,6 +90,17 @@ extends Node
 @export var spin_tick: float = 0.25          ## délai entre deux dégâts sur le même ennemi
 @export var spin_shake: float = 0.2
 
+@export_group("Slam (abeille)")
+## Attraper l'abeille étourdie, la lever au-dessus de la tête, la fracasser
+## au sol : elle éclate en dards qui partent en étoile autour du joueur.
+@export var slam_grab_time: float = 0.14     ## l'abeille rejoint les mains
+@export var slam_duration: float = 0.62      ## armé + abattement + retour (anim coup 3 du rig)
+@export var slam_damage: int = 4             ## sur l'abeille fracassée
+@export var slam_needle_count: int = 5
+@export var slam_needle_damage: int = 2
+@export var slam_needle_height: float = 0.6  ## hauteur de vol des dards
+@export var slam_shake: float = 0.6
+
 @export_group("Esquive")
 ## Un clic fait pendant l'esquive est gardé ce temps-là, puis rejoué à la sortie.
 ## Un peu moins que la durée de l'esquive : un clic du tout début est oublié.
@@ -115,10 +127,17 @@ extends Node
 var is_charging: bool = false
 var is_punching: bool = false
 var is_spinning: bool = false
+var is_slamming: bool = false
+
+var _slam_target: Node3D = null
+var _slam_t: float = 0.0          ## temps écoulé depuis le début du slam
+var _slam_grab_from := Vector3.ZERO
+var _slam_impacted: bool = false
 
 ## Progression de la mise en charge, 0 → 1. Lue par Player.gd pour ralentir
 ## le déplacement en même temps que le poing se met en place.
 var charge_ramp: float = 0.0
+var _charge_sound: Node = null    ## boucle de charge du gantelet, null hors charge
 
 var _step: int = 0                ## 0 = inactif, 1/2 = boucle, 3 = finisher
 var _t: float = 0.0               ## progression normalisée du coup courant
@@ -172,7 +191,7 @@ var is_zipping: bool:
 ## pilote le corps (coup lourd ou propulsion du poing chargé).
 var is_movement_locked: bool:
 	get:
-		return is_finishing or is_zipping
+		return is_finishing or is_zipping or is_slamming
 
 
 func _ready() -> void:
@@ -202,7 +221,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	# --- Commande réaction : uniquement près d'un ennemi étourdi ---
 	if event.is_action_pressed("actionEvenement"):
-		if is_spinning or is_charging or is_punching or player.is_dodging or _step != 0:
+		if is_spinning or is_slamming or is_charging or is_punching or player.is_dodging or _step != 0:
 			return
 		var target = _find_stunned_nearby()
 		if target == null:
@@ -210,6 +229,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		var reaction: String = target.get_reaction() if target.has_method("get_reaction") else "spin"
 		if reaction == "finisher":
 			_start_finisher(target)
+		elif reaction == "slam" and target.has_method("begin_grab"):
+			_start_slam(target)
 		else:
 			_start_spin()
 		return
@@ -220,7 +241,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		# Mémorisé : rejoué à la sortie de l'esquive (voir _consume_dodge_buffer)
 		_dodge_buffer_t = dodge_buffer_time
 		return
-	if is_charging or is_punching or is_spinning:
+	if is_charging or is_punching or is_spinning or is_slamming:
 		return
 
 	if _step == 0:
@@ -237,6 +258,9 @@ func _unhandled_input(event: InputEvent) -> void:
 # ---------------------------------------------------------------- BOUCLE
 
 func _physics_process(delta: float) -> void:
+	if is_slamming:
+		_process_slam(delta)
+		return
 	if is_spinning:
 		_process_spin(delta)
 		return
@@ -312,7 +336,7 @@ func _start(step: int) -> void:
 	_hit_list.clear()
 	rig.play_attack(step)
 	# Le whoosh part même dans le vide : c'est lui qui dit « le coup est parti »
-	Sfx.play_ui("swing", -4.0 if step != 3 else 0.0)
+	Sfx.play_ui("swing", -8.0 if step != 3 else -4.0)
 
 	_lunge(step)
 
@@ -431,14 +455,14 @@ func _collect_hits() -> void:
 			if dir.length() > 0.01:
 				if _step == 3 and "damage_per_hit" in e:
 					var dmg: int = maxi(1, int(round(float(e.damage_per_hit) * finisher_damage_multiplier)))
-					e.take_hit(dir.normalized(), dmg)
+					e.take_hit(dir.normalized(), dmg, true)   # attaque réaction : réveille l'étourdi
 				else:
 					e.take_hit(dir.normalized())
 
 			if _step == 3:
 				_play_hit_sound("hit_heavy", e.global_position, 3.0)
 			else:
-				Sfx.play("hit_light", e.global_position)
+				_play_punch_sound(e.global_position)
 			_sparks.burst(fist.global_position, dir, _step == 3)
 			# Gel du temps réservé aux gros coups : le combo reste fluide
 			if _step == 3:
@@ -473,6 +497,7 @@ func _handle_charge(delta: float) -> void:
 			_charge_t = 0.0
 			charge_ramp = 0.0
 			rig.play_charge()
+			_charge_sound = Sfx.attach_loop("charge_loop", player, -6.0, false)
 		return
 
 	if is_charging:
@@ -480,6 +505,8 @@ func _handle_charge(delta: float) -> void:
 			is_charging = false
 			charge_ramp = 0.0
 			rig.end_charge()
+			Sfx.stop_loop(_charge_sound)
+			_charge_sound = null
 			return
 
 		# Le ralentissement suit la mise en place du poing
@@ -500,6 +527,8 @@ func _release_charge() -> void:
 	is_charging = false
 	charge_ramp = 0.0
 	rig.end_charge()
+	Sfx.stop_loop(_charge_sound)
+	_charge_sound = null
 
 	# Charge avortée : on rend un coup normal plutôt que rien
 	if _charge_t < charge_min_time:
@@ -529,7 +558,8 @@ func _release_charge() -> void:
 	_hit_list.clear()
 	_set_fists(false, true)
 	rig.play_punch(_punch_power, dest)
-	Sfx.play_ui("swing", 2.0)
+	Sfx.play_ui("swing", -3.0)
+	Sfx.play_ui("charge_release", lerpf(-6.0, 0.0, _punch_power))
 
 
 func _process_punch(delta: float) -> void:
@@ -701,10 +731,120 @@ func _spin_hits_check() -> void:
 			var dir: Vector3 = e.global_position - player.global_position
 			dir.y = 0.0
 			if dir.length() > 0.01:
-				e.take_hit(dir.normalized(), spin_damage)
-			Sfx.play("hit_light", e.global_position, -3.0)
+				e.take_hit(dir.normalized(), spin_damage, true)   # attaque réaction
+			_play_punch_sound(e.global_position, -3.0)
 			_sparks.burst(fist.global_position, dir)
 			_shake(spin_shake)
+
+
+# ---------------------------------------------------------------- SLAM
+
+## Réaction de l'abeille : le joueur l'attrape à deux mains, la lève
+## au-dessus de sa tête et la fracasse au sol. On réutilise l'animation du
+## coup 3 du rig (armé haut, abattement), l'abeille suit simplement les mains.
+func _start_slam(target: Node) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+	if not target.begin_grab():
+		return
+
+	is_slamming = true
+	_slam_target = target as Node3D
+	_slam_t = 0.0
+	_slam_impacted = false
+	_slam_grab_from = _slam_target.global_position
+	_step = 0
+	_t = 0.0
+	_grace = 0.0
+	_buffered = false
+	_press_t = -1.0
+	_set_fists(false, false)
+
+	player.velocity.x = 0.0
+	player.velocity.z = 0.0
+	var to_t: Vector3 = _slam_target.global_position - player.global_position
+	to_t.y = 0.0
+	if to_t.length() > 0.01:
+		player.rotation.y = atan2(-to_t.x, -to_t.z)
+
+	# Pas de magnétisme : les mains tiennent l'abeille, elles ne visent rien
+	rig.set_forced_magnet(null)
+	rig.play_attack(3)
+	rig.set_attack_progress(0.0)
+	Sfx.play_ui("swing", -4.0)
+
+
+func _process_slam(delta: float) -> void:
+	_slam_t += delta
+	player.velocity.x = 0.0
+	player.velocity.z = 0.0
+
+	var held: bool = _slam_target != null and is_instance_valid(_slam_target)
+	var hands: Vector3 = (rig.hand_l.global_position + rig.hand_r.global_position) * 0.5
+
+	# --- 1. Saisie : l'abeille est tirée jusqu'aux mains ---
+	if _slam_t < slam_grab_time:
+		if held:
+			var k: float = _slam_t / maxf(slam_grab_time, 0.01)
+			_slam_target.global_position = _slam_grab_from.lerp(hands, k * k * (3.0 - 2.0 * k))
+		return
+
+	# --- 2. Armé + abattement : l'abeille suit les mains ---
+	var t: float = (_slam_t - slam_grab_time) / maxf(slam_duration, 0.01)
+	rig.set_attack_progress(minf(t, 1.0))
+
+	if not _slam_impacted:
+		if held:
+			_slam_target.global_position = hands
+		if t >= rig.slam_strike_end:
+			_slam_impact(hands)
+
+	if t >= 1.0:
+		_end_slam()
+
+
+## L'impact : l'abeille est écrasée au sol et les dards partent en étoile.
+func _slam_impact(hands: Vector3) -> void:
+	_slam_impacted = true
+	var ground: Vector3 = Vector3(hands.x, player.global_position.y, hands.z)
+	var ignore: Array[Node] = []
+
+	if _slam_target != null and is_instance_valid(_slam_target):
+		ignore.append(_slam_target)
+		_slam_target.global_position = ground
+		var dir: Vector3 = ground - player.global_position
+		dir.y = 0.0
+		_slam_target.end_grab()
+		_slam_target.take_hit(dir.normalized() if dir.length() > 0.01 else -player.global_transform.basis.z,
+			slam_damage, true)   # attaque réaction
+		_sparks.burst(ground, Vector3.UP, true)
+
+	# Étoile régulière, la première pointe dans le regard du joueur
+	var fwd: Vector3 = -player.global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var origin: Vector3 = player.global_position
+	origin.y += slam_needle_height
+	var count: int = maxi(slam_needle_count, 1)
+	for i in count:
+		var d: Vector3 = fwd.rotated(Vector3.UP, TAU * float(i) / float(count))
+		SlamNeedle.spawn(get_tree().current_scene, origin + d * 0.5, d, slam_needle_damage, ignore)
+
+	_play_hit_sound("hit_heavy", ground, 4.0)
+	Sfx.play("slam", ground, 2.0)
+	Sfx.play("hornet_shoot", ground)
+	_hit_stop(true)
+	_shake(slam_shake)
+
+
+func _end_slam() -> void:
+	# Sécurité : si l'impact n'a pas eu lieu, on relâche quand même l'abeille
+	if not _slam_impacted and _slam_target != null and is_instance_valid(_slam_target):
+		_slam_target.end_grab()
+	is_slamming = false
+	_slam_target = null
+	rig.end_attack()
+	_grace = chain_grace
 
 
 # ---------------------------------------------------------------- RESSENTI
@@ -717,6 +857,15 @@ func _hit_stop(heavy: bool = false) -> void:
 	# Passe par l'autoload : un seul propriétaire de Engine.time_scale, sinon
 	# deux gels concurrents se remettent mutuellement à 1.0.
 	HitStop.hit(dur, hit_stop_scale)
+
+
+## Coup du combo : une des trois variantes punch_1..3, jamais la même deux
+## fois de suite.
+var _punch_variant: int = 0
+
+func _play_punch_sound(pos: Vector3, volume_db: float = 0.0) -> void:
+	_punch_variant = (_punch_variant + 1 + randi() % 2) % 3
+	_play_hit_sound("punch_%d" % (_punch_variant + 1), pos, volume_db)
 
 
 ## Joue key s'il existe, sinon retombe sur hit_light : un son manquant
@@ -745,7 +894,7 @@ func get_available_action() -> String:
 
 ## L'ennemi étourdi sur lequel la commande réaction partirait maintenant.
 func _reaction_target():
-	if is_spinning or is_charging or is_punching or player.is_dodging or _step != 0:
+	if is_spinning or is_slamming or is_charging or is_punching or player.is_dodging or _step != 0:
 		return null
 	if not player.controls_enabled:
 		return null

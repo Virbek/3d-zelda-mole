@@ -100,7 +100,8 @@ func _sweep_world(from: Vector3, to: Vector3) -> Variant:
 	var space := get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(from, to, world_mask)
 	var exclude: Array[RID] = []
-	if shooter is CollisionObject3D:
+	# Le tireur peut mourir pendant que son dard vole : ne pas le toucher libéré
+	if is_instance_valid(shooter) and shooter is CollisionObject3D:
 		exclude.append((shooter as CollisionObject3D).get_rid())
 	# Joueur et ennemis ne bloquent pas le tir : on les exclut et on relance
 	for i in 4:
@@ -178,6 +179,7 @@ func _on_body_entered(body: Node3D) -> void:
 ## sans qu'on comprenne qu'il a touché quelque chose.
 func _pop() -> void:
 	_dead = true
+	Sfx.play("projectile_hit", global_position, -4.0)
 	set_deferred("monitoring", false)
 
 	var t := create_tween().set_parallel(true)

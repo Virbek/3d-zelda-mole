@@ -34,6 +34,10 @@ extends Node3D
 @export var stance_width: float = 0.30      ## écartement latéral des pieds
 @export var step_threshold: float = 0.50    ## distance avant de déclencher un pas
 @export var step_duration: float = 0.20     ## durée d'un pas
+@export var sprint_step_duration: float = 0.14  ## durée d'un pas à pleine course : la cadence accélère
+@export var step_duration_jitter: float = 0.12  ## ± variation de chaque pas : le rythme n'est pas métronomique
+@export var step_volume_db: float = -16.0   ## bruit de pas : discret, on l'entend souvent
+@export var sprint_step_volume_db: float = -13.0 ## en course, les pas tapent plus fort
 @export var step_height: float = 0.20       ## hauteur de l'arc du pas
 @export var step_lead: float = 0.45         ## anticipation dans la direction du mouvement
 
@@ -87,6 +91,37 @@ extends Node3D
 @export var hand_stiffness: float = 55.0
 @export var hand_damping: float = 7.0
 @export var hand_swing: float = 0.35
+
+@export_group("Mains pendantes")
+## Au repos, chaque poing pend au bout de son fil électrique comme un pendule :
+## accroché à l'épaule, il tombe sous l'effet de la gravité, traîne derrière
+## le mouvement et se balance. Les coups le pilotent toujours directement.
+@export var hang_enabled: bool = true
+## Point d'accroche du fil (repère du buste, x par côté). Juste à la surface
+## du corps : plus à l'intérieur, les poings frotteraient contre lui.
+@export var shoulder_anchor := Vector3(0.4, -0.3, 0.0)
+@export var hang_length: float = 0.34        ## longueur du fil : distance max épaule → poing
+@export var hang_spread: float = 0.17        ## écart latéral du poing au repos, vers l'extérieur
+@export var hang_body_margin: float = 0.03   ## jeu entre le poing et la surface du corps
+## En course, les poings filent DERRIÈRE le corps, dans l'axe de la course
+## (pas sur les côtés) : le fil s'allonge vers l'arrière jusqu'à cette
+## distance en plein sprint.
+@export var hang_run_trail: float = 0.5
+## Remontée des poings en mouvement (fraction de la chute au repos) : portés
+## par l'air, ils pendent moins. Dès la marche, puis davantage en sprint.
+@export var hang_move_lift: float = 0.25
+@export var hang_run_lift: float = 0.3
+## Hauteur minimale du centre du poing au-dessus du sol : la longueur du
+## poing qui pend (jointures vers le bas) plus un petit jeu. Ne traverse
+## jamais le sol.
+@export var hang_floor_clearance: float = 0.36
+## Rappel renforcé en mouvement (× (1 + valeur) à pleine vitesse) : les
+## poings tiennent leur place derrière au lieu de ballotter.
+@export var hang_move_stiffness: float = 5.0
+@export var hang_run_blend: float = 6.0      ## vitesse d'ouverture / fermeture
+@export var hang_gravity: float = 16.0
+@export var hang_stiffness: float = 10.0     ## rappel doux vers la position de repos
+@export var hang_damping: float = 2.6        ## bas = balancement qui dure
 
 @export_group("Attaque")
 @export var attack_reach: float = 0.85      ## rayon du balayage circulaire
@@ -163,6 +198,7 @@ class Foot:
 	var t := 0.0
 	var from := Vector3.ZERO
 	var to := Vector3.ZERO
+	var dur_k := 1.0   ## variation de durée tirée à chaque pas
 
 
 class Hand:
@@ -174,6 +210,7 @@ class Hand:
 
 var _feet := []
 var _hands := []
+var _hang_run_k: float = 0.0     ## 0 en marche → 1 en plein sprint (lissé)
 
 var _body_pos := Vector3.ZERO
 var _body_vel := Vector3.ZERO
@@ -227,7 +264,7 @@ var _punch_hit: bool = false       ## le poing a buté : il ne repart pas en ava
 @export_group("Gantelets")
 @export var use_gauntlets: bool = true      ## remplace les sphères des mains par les gantelets mécaniques
 @export var gauntlet_outline: float = 0.008 ## épaisseur du contour noir (0 = aucun)
-@export var gauntlet_scale: float = 1.25    ## taille : un peu gros, pour rester lisible vu de haut
+@export var gauntlet_scale: float = 1.1     ## taille des poings
 ## Rotation sur l'axe du bras : 90 = poing vertical (jointures à la verticale,
 ## pouce en haut), 0 = poing à plat.
 @export var gauntlet_roll: float = 90.0
@@ -249,7 +286,16 @@ var _gauntlet_r: Gauntlet = null
 @export var boot_turn_limit: float = 70.0   ## au-delà, un pied posé pivote sur place
 @export var use_outfit: bool = true         ## foulard, ceinture et petit sac de la taupe
 @export var use_tethers: bool = true        ## filaments électriques corps ↔ membres
+## Pendant un coup, les filaments des poings se courbent en arc, traînant
+## derrière le mouvement du poing comme un câble fouetté. Fraction de la
+## longueur du filament (0 = toujours tendu).
+@export var tether_attack_bow: float = 0.35
+@export var tether_bow_in: float = 14.0     ## vitesse d'apparition de l'arc
+@export var tether_bow_out: float = 5.0     ## vitesse de retour à un fil tendu
 var _tethers: EnergyTethers = null
+var _bow_k: float = 0.0                       ## 0 tendu → 1 arc plein (lissé)
+var _bow_dir: Array[Vector3] = [Vector3.UP, Vector3.UP]   ## sens de l'arc par poing
+var _bow_prev: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 ## Par pied : [botte, Foot, cap actuel, cap au début du pas, était en l'air]
 var _boots: Array = []
 ## [gantelet, côté, direction actuelle des jointures, roulis actuel en degrés]
@@ -268,7 +314,8 @@ var _return_from := [Vector3.ZERO, Vector3.ZERO]
 @export_group("Objet obtenu")
 @export var present_lean_degrees: float = 14.0   ## cambrure du buste vers l'arrière
 @export var present_fist_height: float = 0.95    ## poing au-dessus du centre du corps
-@export var present_item_height: float = 0.45    ## objet au-dessus du poing
+@export var present_item_height: float = 0.3     ## centre de l'objet au-dessus de la paume
+@export var present_item_scale: float = 0.65     ## taille de l'objet tenu (la clé fait 0,7 m)
 var _presenting: bool = false
 var _present_item: Node3D = null
 
@@ -334,6 +381,7 @@ func _physics_process(delta: float) -> void:
 	_update_hands(delta)
 	_update_gauntlets(delta)
 	_update_boots(delta)
+	_update_tether_bow(delta)
 
 
 ## Appelé par Player.gd à la mort. Chaque membre arrête d'être piloté par le
@@ -704,7 +752,7 @@ func _attach_tethers() -> void:
 	for entry in _gauntlets:
 		var g: Node3D = entry[0]
 		var side: float = entry[1]
-		var shoulder := Vector3(0.3 * side, -0.3, 0.0)
+		var shoulder := Vector3(shoulder_anchor.x * side, shoulder_anchor.y, shoulder_anchor.z)
 		_tethers.add_link(
 			func() -> Vector3: return body.global_transform * shoulder,
 			func() -> Vector3: return g.global_transform * Vector3(0.0, 0.0, 0.2)   # manchette
@@ -777,6 +825,10 @@ func _update_gauntlets(delta: float) -> void:
 	fwd.y = 0.0
 	fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
 	var target = get_magnet_target()
+	# Pas de cible accrochée : on vise quand même l'ennemi le plus proche
+	# devant, pour que le poing qui frappe pointe vers lui.
+	if attacking and not _spinning and target == null:
+		target = _nearest_enemy_ahead(fwd)
 
 	# Déplacement : direction et part de « poings à l'horizontale » (0 → 1)
 	var hv := Vector3(player.velocity.x, 0.0, player.velocity.z)
@@ -792,6 +844,10 @@ func _update_gauntlets(delta: float) -> void:
 		var want: Vector3 = Vector3.DOWN
 		if attacking:
 			want = _gauntlet_attack_dir(hand_pos, fwd, target)
+		elif hang_enabled:
+			# Il pend : jointures dans l'axe du fil, manchette vers l'épaule
+			var rope: Vector3 = hand_pos - _shoulder(side)
+			want = rope.normalized() if rope.length() > 0.05 else Vector3.DOWN
 		elif move_k > 0.0:
 			# En marche : les poings passent à l'horizontale, jointures vers
 			# l'arrière (ils traînent derrière le mouvement)
@@ -814,8 +870,50 @@ func _update_gauntlets(delta: float) -> void:
 		# Poing vertical : pouce vers le haut (ou vers l'avant quand il pend)
 		aim = aim * Basis(Vector3(0.0, 0.0, 1.0), deg_to_rad(-roll * side))
 
+		# En frappe : le bout du poing pointe sur l'ennemi et la paume fait
+		# face au joueur, quelle que soit la position du bras.
+		if attacking and not _spinning:
+			aim = _strike_basis(cur, hand_pos)
+
 		var parent_rot: Basis = (g.get_parent() as Node3D).global_basis.orthonormalized()
-		g.quaternion = (parent_rot.inverse() * aim).get_rotation_quaternion()
+		var want_q: Quaternion = (parent_rot.inverse() * aim).get_rotation_quaternion()
+		g.quaternion = g.quaternion.slerp(want_q, k).normalized()
+
+
+## Repère du poing qui frappe : -Z (le bout, les jointures) vers `dir`,
+## -Y (la paume) tourné vers le joueur. Le dessous du gantelet est la paume
+## (voir present_item), son dessus porte l'écran.
+func _strike_basis(dir: Vector3, hand_pos: Vector3) -> Basis:
+	var z: Vector3 = -dir.normalized()
+	# Vers le joueur, sans la part dans l'axe du coup
+	var to_player: Vector3 = _body_pos - hand_pos
+	to_player -= dir.normalized() * to_player.dot(dir.normalized())
+	if to_player.length() < 0.05:
+		to_player = Vector3.DOWN - dir.normalized() * Vector3.DOWN.dot(dir.normalized())
+		if to_player.length() < 0.05:
+			to_player = Vector3.RIGHT
+	var y: Vector3 = -to_player.normalized()       # dessus de la main = à l'opposé de la paume
+	var x: Vector3 = y.cross(z).normalized()
+	y = z.cross(x).normalized()
+	return Basis(x, y, z)
+
+
+## Ennemi le plus proche devant le joueur, à portée de coup (ou null).
+func _nearest_enemy_ahead(fwd: Vector3) -> Node3D:
+	var best: Node3D = null
+	var best_d: float = magnet_range
+	for e in get_tree().get_nodes_in_group("enemy"):
+		var n := e as Node3D
+		if n == null or not is_instance_valid(n):
+			continue
+		var to_e: Vector3 = n.global_position - _body_pos
+		to_e.y = 0.0
+		var d: float = to_e.length()
+		if d >= best_d or d < 0.01 or to_e.normalized().dot(fwd) < 0.2:
+			continue
+		best = n
+		best_d = d
+	return best
 
 
 ## Où pointent les jointures pendant un coup : vers la cible si le magnétisme
@@ -842,6 +940,85 @@ func _slerp_dir(from: Vector3, to: Vector3, k: float) -> Vector3:
 		# Demi-tour pile : on passe par l'avant pour éviter l'ambiguïté
 		a = (a + Vector3.FORWARD * 0.01).normalized()
 	return a.slerp(to, k).normalized()
+
+
+## Le poing pendu ne traverse jamais le corps : s'il passe sous la surface
+## du cône (plus le demi-gabarit du gantelet), il est repoussé vers
+## l'extérieur et perd la vitesse qui le faisait rentrer.
+func _push_out_of_body(h: Hand) -> void:
+	var inv: Transform3D = body.global_transform.affine_inverse()
+	var lp: Vector3 = inv * h.pos
+	var flat := Vector2(lp.x, lp.z)
+	var min_r: float = MoleOutfit.body_radius(lp.y) + 0.14 * gauntlet_scale + hang_body_margin
+	if flat.length() >= min_r:
+		return
+	var dir2: Vector2 = flat.normalized() if flat.length() > 0.01 else Vector2(h.side, 0.0)
+	flat = dir2 * min_r
+	h.pos = body.global_transform * Vector3(flat.x, lp.y, flat.y)
+	var n: Vector3 = body.global_transform.basis * Vector3(dir2.x, 0.0, dir2.y)
+	n = n.normalized()
+	var inward: float = h.vel.dot(n)
+	if inward < 0.0:
+		h.vel -= n * inward
+
+
+## Le poing pendu reste en l'air : il est arrêté au-dessus du sol et perd
+## sa vitesse vers le bas (pas de rebond).
+func _keep_above_floor(h: Hand) -> void:
+	# Rayon court, lancé juste au-dessus du poing : un rayon parti de haut
+	# toucherait le dessus d'une caisse voisine et y percherait le poing.
+	var space := get_world_3d().direct_space_state
+	var from: Vector3 = h.pos + Vector3.UP * 0.4
+	var q := PhysicsRayQueryParameters3D.create(from, h.pos + Vector3.DOWN * 1.5)
+	q.exclude = [player.get_rid()]
+	q.collision_mask = clip_mask
+	var hit := space.intersect_ray(q)
+	# Rien dessous, ou « sol » au-dessus du poing (il frôle une caisse) :
+	# c'est le clip contre le décor qui gère, pas le sol.
+	if hit.is_empty() or hit.position.y > h.pos.y:
+		return
+	var min_y: float = hit.position.y + hang_floor_clearance * gauntlet_scale / 1.1
+	if h.pos.y < min_y:
+		h.pos.y = min_y
+		if h.vel.y < 0.0:
+			h.vel.y = 0.0
+
+
+## Courbe les filaments des poings pendant un coup. L'arc se creuse à
+## l'opposé du déplacement du poing : le câble « traîne » derrière lui.
+## Les filaments 0 et 1 sont ceux des gantelets (gauche, droit), dans
+## l'ordre de _attach_tethers.
+func _update_tether_bow(delta: float) -> void:
+	if _tethers == null or _gauntlets.is_empty() or delta <= 0.0:
+		return
+	var attacking: bool = _atk_kind != 0 or _punching or _spinning or _charging
+	var rate: float = tether_bow_in if attacking else tether_bow_out
+	_bow_k = lerpf(_bow_k, 1.0 if attacking else 0.0, 1.0 - exp(-rate * delta))
+
+	for i in mini(_gauntlets.size(), 2):
+		var g: Node3D = _gauntlets[i][0]
+		var side: float = _gauntlets[i][1]
+		var a: Vector3 = body.global_transform * Vector3(shoulder_anchor.x * side, shoulder_anchor.y, shoulder_anchor.z)
+		var b: Vector3 = g.global_transform * Vector3(0.0, 0.0, 0.2)
+		var rope: Vector3 = b - a
+		var length: float = rope.length()
+
+		# Vitesse du poing, sans sa part le long du fil : seule la part
+		# transversale plie le câble.
+		var vel: Vector3 = (b - _bow_prev[i]) / delta if _bow_prev[i] != Vector3.ZERO else Vector3.ZERO
+		_bow_prev[i] = b
+		if length > 0.01:
+			var axis: Vector3 = rope / length
+			vel -= axis * vel.dot(axis)
+		if vel.length() > 0.5:
+			_bow_dir[i] = _slerp_dir(_bow_dir[i], -vel.normalized(), 1.0 - exp(-12.0 * delta))
+
+		_tethers.set_bow(i, _bow_dir[i] * length * tether_attack_bow * _bow_k)
+
+
+## Point d'accroche du fil d'une main, en coordonnées monde.
+func _shoulder(side: float) -> Vector3:
+	return body.global_transform * Vector3(shoulder_anchor.x * side, shoulder_anchor.y, shoulder_anchor.z)
 
 
 ## La lueur de charge va sur le gantelet s'il existe, sinon sur la sphère.
@@ -888,7 +1065,7 @@ func _hand_r_mesh() -> MeshInstance3D:
 
 ## dest : le point du monde que le poing doit atteindre (fourni par Combat.gd,
 ## qui a déjà résolu la cible et orienté le joueur).
-func play_punch(power: float, dest: Vector3) -> void:
+func play_punch(_power: float, dest: Vector3) -> void:
 	_charging = false
 	_punching = true
 	_punch_k = 0.0
@@ -954,8 +1131,8 @@ func _punch_hand_position() -> Vector3:
 	if _punch_hit:
 		if t < hold_end:
 			return _impact_pos
-		var kb: float = clampf((t - hold_end) / punch_back_time, 0.0, 1.0)
-		return _arc(_to_polar(_impact_pos), _to_polar(_hand_home()), kb)
+		var back_k: float = clampf((t - hold_end) / punch_back_time, 0.0, 1.0)
+		return _arc(_to_polar(_impact_pos), _to_polar(_hand_home()), back_k)
 
 	# Destination réévaluée : le poing suit sa cible si elle bouge
 	var dest: Vector3 = _punch_target
@@ -1030,6 +1207,33 @@ func _rest_target(f: Foot) -> Vector3:
 	return p
 
 
+## Bruit de pas : une des trois variantes (step_1..3) au point d'appui.
+## Clés différentes à chaque pas : la dédup de Sfx ne coupe pas deux pieds
+## qui se posent presque ensemble (atterrissage d'esquive).
+var _step_variant: int = 0
+
+func _play_step(pos: Vector3) -> void:
+	var sfx: Node = get_node_or_null("/root/Sfx")
+	if sfx == null:
+		return
+	_step_variant = (_step_variant + 1 + randi() % 2) % 3
+	var vol: float = lerpf(step_volume_db, sprint_step_volume_db, _run_k())
+	sfx.call("play", "step_%d" % (_step_variant + 1), pos, vol + randf_range(-1.5, 1.5))
+
+
+## 0 à la vitesse de marche, 1 à pleine course.
+func _run_k() -> float:
+	var walk: float = float(player.get("speed"))
+	var run: float = float(player.get("sprint_speed"))
+	var v: float = Vector2(player.velocity.x, player.velocity.z).length()
+	return clampf((v - walk) / maxf(run - walk, 0.01), 0.0, 1.0)
+
+
+## Durée d'un pas selon l'allure : plus on court, plus les pas sont brefs.
+func _step_duration() -> float:
+	return lerpf(step_duration, sprint_step_duration, _run_k())
+
+
 ## Les pieds marchent normalement même pendant le poing chargé : le joueur
 ## reste au sol, seul son bras part. C'est la différence avec l'ancien dash.
 func _update_feet(delta: float) -> void:
@@ -1046,13 +1250,14 @@ func _update_feet(delta: float) -> void:
 	# 1. Faire avancer les pas en cours
 	for f in _feet:
 		if f.stepping:
-			var dur: float = dodge_step_duration if player.is_dodging else step_duration
+			var dur: float = dodge_step_duration if player.is_dodging else _step_duration() * f.dur_k
 			f.t += delta / dur
 			if f.t >= 1.0:
 				f.t = 1.0
 				f.stepping = false
 				f.planted = f.to
 				_body_vel.y -= land_impulse
+				_play_step(f.planted)
 			var p: Vector3 = f.from.lerp(f.to, f.t)
 			p.y += sin(f.t * PI) * step_height
 			f.node.global_position = p
@@ -1076,6 +1281,7 @@ func _update_feet(delta: float) -> void:
 	if worst != null:
 		worst.stepping = true
 		worst.t = 0.0
+		worst.dur_k = 1.0 + randf_range(-step_duration_jitter, step_duration_jitter)
 		worst.from = worst.planted
 		worst.to = _rest_target(worst)
 
@@ -1209,6 +1415,19 @@ func _update_hands(delta: float) -> void:
 	# On travaille dans le repère du corps : les mains héritent de son inclinaison
 	var b: Basis = body.global_transform.basis
 
+	# Course : écart latéral et longueur de fil, recalculés une fois par frame
+	# _run_k : 0 en marche, 1 en plein sprint
+	var run_target: float = _run_k()
+	_hang_run_k = lerpf(_hang_run_k, run_target, 1.0 - exp(-hang_run_blend * delta))
+	var spread: float = hang_spread
+	var trail: float = hang_run_trail * _hang_run_k
+	var move_k: float = clampf(Vector2(player.velocity.x, player.velocity.z).length() \
+		/ maxf(float(player.get("sprint_speed")), 0.01), 0.0, 1.0)
+	var hang_k: float = hang_stiffness * (1.0 + hang_move_stiffness * move_k)
+	var drop: float = sqrt(maxf(hang_length * hang_length - hang_spread * hang_spread, 0.01)) \
+		* clampf(1.0 - hang_move_lift * move_k - hang_run_lift * _hang_run_k, 0.2, 1.0)
+	var rope_len: float = sqrt(drop * drop + spread * spread + trail * trail)
+
 	for h in _hands:
 		var local := Vector3(hand_offset.x * h.side, hand_offset.y, hand_offset.z)
 		if _spinning:
@@ -1241,6 +1460,13 @@ func _update_hands(delta: float) -> void:
 			continue
 
 		var target: Vector3 = body.global_position + b * local
+		var anchor: Vector3 = _shoulder(h.side)
+		if hang_enabled:
+			# Repos : sous l'épaule, au bout du fil. Le balancement de la
+			# marche se garde, il pousse simplement le pendule. En course,
+			# le poing recule derrière l'épaule (+Z = arrière du buste).
+			target = anchor + b * Vector3(spread * h.side, 0.0, local.z - hand_offset.z + trail) \
+				+ Vector3.DOWN * drop
 
 		# --- Cette main est-elle pilotée par l'attaque en cours ? ---
 		var driven := false
@@ -1278,9 +1504,27 @@ func _update_hands(delta: float) -> void:
 		if _recover_t > 0.0 and (_recover_side == 0.0 or h.side == _recover_side):
 			stiff *= 1.0 - (_recover_t / attack_recover)
 
-		h.vel += (target - h.pos) * stiff * delta
-		h.vel *= exp(-hand_damping * delta)
-		h.pos += h.vel * delta
+		if hang_enabled:
+			h.vel += Vector3.DOWN * hang_gravity * delta
+			h.vel += (target - h.pos) * hang_k * (stiff / maxf(hand_stiffness, 0.01)) * delta
+			h.vel *= exp(-hang_damping * delta)
+			h.pos += h.vel * delta
+			# Le fil est tendu : le poing ne s'éloigne jamais plus que sa
+			# longueur, et la vitesse qui tirait sur le fil est absorbée.
+			var rope: Vector3 = h.pos - anchor
+			var rl: float = rope.length()
+			if rl > rope_len and rl > 0.001:
+				var n: Vector3 = rope / rl
+				h.pos = anchor + n * rope_len
+				var out: float = h.vel.dot(n)
+				if out > 0.0:
+					h.vel -= n * out
+			_push_out_of_body(h)
+			_keep_above_floor(h)
+		else:
+			h.vel += (target - h.pos) * stiff * delta
+			h.vel *= exp(-hand_damping * delta)
+			h.pos += h.vel * delta
 
 		var idx: int = 1 if h.side > 0.0 else 0
 		var clipped: Vector3 = _clip(body.global_position, h.pos, hand_clip_radius)
@@ -1309,22 +1553,40 @@ func _update_hands(delta: float) -> void:
 
 # ---------------------------------------------------------------- OBJET OBTENU
 
-## Lève le poing droit au-dessus de la tête, cambre le buste et pose `item`
-## sur le poing. Les tweens tournent même jeu en pause : le coffre fige le
-## monde pendant la présentation. Le rig ne simule plus rien jusqu'à
-## end_present().
+## Lève la main droite au-dessus de la tête, ouverte, paume vers le ciel,
+## cambre le buste et fait flotter `item` au creux de la paume. Les tweens
+## tournent même jeu en pause : le coffre fige le monde pendant la
+## présentation. Le rig ne simule plus rien jusqu'à end_present().
 func present_item(item: Node3D) -> Tween:
 	_presenting = true
 	_clear_charge_glow()
 	var yaw := Basis(Vector3.UP, player.rotation.y)
+	var fwd: Vector3 = yaw * Vector3.FORWARD
 	var center: Vector3 = body.global_position
 	var fist_r: Vector3 = center + yaw * Vector3(0.12, present_fist_height, -0.05)
 	var fist_l: Vector3 = center + yaw * Vector3(-0.5, -0.1, 0.05)
 
+	# Paume vers le ciel : le dessous du gantelet (-Y) regarde en haut, les
+	# doigts (-Z) pointent vers l'avant et un peu vers l'extérieur.
+	var fingers: Vector3 = (fwd + yaw * Vector3.RIGHT * 0.35).normalized()
+	var palm_basis := Basis.looking_at(fingers, Vector3.DOWN)
+	var palm_center: Vector3 = fist_r
+	if _gauntlet_r != null:
+		_gauntlet_r.set_open(true)
+		var parent_rot: Basis = (_gauntlet_r.get_parent() as Node3D).global_basis.orthonormalized()
+		var local_q: Quaternion = (parent_rot.inverse() * palm_basis).get_rotation_quaternion()
+		palm_center = fist_r + palm_basis * (Vector3(0.0, -0.12, -0.1) * gauntlet_scale)
+		var gt := create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		gt.tween_property(_gauntlet_r, "quaternion", local_q, 0.25)
+		for entry in _gauntlets:
+			if entry[0] == _gauntlet_r:
+				entry[2] = fingers   # reprise douce au retour
+	var item_pos: Vector3 = palm_center + Vector3.UP * present_item_height
+
 	_present_item = item
 	add_child(item)
 	item.top_level = true
-	item.global_position = fist_r + Vector3.UP * (present_item_height - 0.25)
+	item.global_position = palm_center
 	item.scale = Vector3.ONE * 0.01
 
 	var t := create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).set_parallel(true)
@@ -1333,12 +1595,16 @@ func present_item(item: Node3D) -> Tween:
 	t.tween_property(hand_l, "global_position", fist_l, 0.3)
 	t.tween_property(body, "global_position", center + Vector3.UP * 0.06, 0.3)
 	t.tween_property(body, "rotation", Vector3(deg_to_rad(present_lean_degrees), player.rotation.y, 0.0), 0.3)
-	# L'objet jaillit au-dessus du poing un peu après le bras
-	t.tween_property(item, "global_position", fist_r + Vector3.UP * present_item_height, 0.35).set_delay(0.15)
-	t.tween_property(item, "scale", Vector3.ONE, 0.35).set_delay(0.15)
-	# Rotation lente de l'objet ; le tween vit et meurt avec lui
+	# L'objet jaillit de la paume un peu après le bras
+	t.tween_property(item, "global_position", item_pos, 0.35).set_delay(0.15)
+	t.tween_property(item, "scale", Vector3.ONE * present_item_scale, 0.35).set_delay(0.15)
+	# Rotation lente + léger flottement ; les tweens vivent et meurent avec lui
 	var spin := item.create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).set_loops()
 	spin.tween_property(item, "rotation:y", TAU, 3.0).as_relative()
+	var bob := item.create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).set_loops()
+	bob.tween_interval(0.5)
+	bob.tween_property(item, "global_position:y", item_pos.y + 0.05, 0.8).set_trans(Tween.TRANS_SINE)
+	bob.tween_property(item, "global_position:y", item_pos.y, 0.8).set_trans(Tween.TRANS_SINE)
 	return t
 
 
@@ -1354,6 +1620,8 @@ func end_present() -> Tween:
 		if _present_item != null and is_instance_valid(_present_item):
 			_present_item.queue_free()
 		_present_item = null
+		if _gauntlet_r != null:
+			_gauntlet_r.set_open(false)
 		for h in _hands:
 			h.pos = h.node.global_position
 			h.vel = Vector3.ZERO

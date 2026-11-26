@@ -72,7 +72,7 @@ signal died
 @export var death_launch: float = 1.6
 
 @export_group("Étourdissement")
-@export var stun_duration: float = 3.0
+@export var stun_duration: float = 1.0
 @export var stun_color := Color(0.25, 1.0, 0.35)
 @export var stun_wobble: float = 0.12   ## amplitude du vacillement
 @export var stun_hits_required: int = 4     ## nombre de coups pour étourdir
@@ -200,7 +200,15 @@ func _chase(delta: float) -> void:
 		_lose_t = 0.0
 
 		
+	# En recharge mais au contact : il tourne autour plutôt que de foncer
+	# dans les jambes du joueur.
+	if d < charge_range and _cooldown > 0.0:
+		_circle(delta, d)
+		return
+
 	if d < charge_range and _cooldown <= 0.0:
+		# Il garde sa place dans la file même quand le couloir est bouché
+		AttackToken.enqueue(self)
 		if not _has_clear_line_to_player():
 			# Un pilier ou un autre ennemi coupe le couloir : charger
 			# maintenant raterait à coup sûr. On se replace en attendant une
@@ -226,8 +234,10 @@ func _circle(delta: float, d: float) -> void:
 	var to_player: Vector3 = _dir_to_player()
 	var tangent: Vector3 = to_player.cross(Vector3.UP) * circle_dir
 
-	# Maintient la distance tout en tournant
-	var radial: float = (d - circle_distance) * 0.8
+	# Maintient la distance tout en tournant ; plus il est loin dans la file
+	# d'attente, plus il tourne large, pour que les attendants s'étagent.
+	var ring: float = circle_distance + 0.6 * float(clampi(AttackToken.queue_index(self), 0, 3))
+	var radial: float = (d - ring) * 0.8
 	var move: Vector3 = tangent + to_player * radial
 	move = move.normalized()
 
@@ -442,7 +452,7 @@ func _has_clear_line_to_player() -> bool:
 
 ## damage a une valeur par défaut : les coups normaux appellent take_hit(dir),
 ## le dash chargé passe ses propres dégâts.
-func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
+func take_hit(direction: Vector3, damage: int = damage_per_hit, breaks_stun: bool = false) -> void:
 	if state == State.DEAD:
 		return
 
@@ -456,10 +466,9 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit) -> void:
 	# Recul visible : plus marqué pour un coup lourd
 	_hit_react.play(direction, clampf(float(damage) / float(maxi(damage_per_hit, 1)), 1.0, 2.0))
 
-	# Le joueur appelle add_stun AVANT take_hit : le coup qui vient de remplir
-	# la jauge ne doit pas annuler l'étourdissement qu'il a lui-même déclenché.
-	# Tout coup suivant, lui, réveille l'ennemi (il passe en HURT ci-dessous).
-	if state == State.STUNNED and Engine.get_physics_frames() == _stun_frame:
+	# Étourdi, il encaisse sans se réveiller : seule l'attaque réaction
+	# (finisher / toupie, breaks_stun = true) met fin à l'étourdissement.
+	if state == State.STUNNED and not breaks_stun:
 		return
 
 	# Une charge interrompue par un coup : c'est la récompense du joueur
@@ -577,7 +586,7 @@ func stun(duration: float) -> void:
 		_tele_tween.kill()
 	_mat.albedo_color = stun_color
 
-func _stunned(delta: float) -> void:
+func _stunned(_delta: float) -> void:
 	velocity.x = 0.0
 	velocity.z = 0.0
 

@@ -43,7 +43,11 @@ enum KeySource {
 ## Plus utilisé : toute salle avec des ennemis enferme désormais le joueur.
 ## Gardé pour ne pas casser les salles déjà enregistrées.
 @export var lock_in: bool = false
+## Quand et où le coffre de la salle apparaît (le nom date de l'époque où
+## les coffres ne contenaient que des clés ; gardé pour les salles enregistrées).
 @export var key_source: KeySource = KeySource.NONE
+## Ce que contient le coffre. Vide = une petite clé.
+@export var chest_item: ItemData
 
 @export_group("Disposition")
 ## Piliers, coffre et clé placés case par case (voir en haut du fichier).

@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="3DZeldaMole"
-run/main_scene="uid://u0qu6fw50sb6"
+run/main_scene="uid://bfl105o0j1bd4"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
 
@@ -22,6 +22,8 @@ AttackToken="*uid://fg4ni32tb40h"
 Sfx="*uid://t737nmroqnqi"
 Checkpoints="*uid://dsgo6giwll18o"
 PauseMenu="*res://Script/ui/pause_menu.gd"
+Inventory="*res://Script/AutoLoad/inventory.gd"
+InventoryMenu="*res://Script/ui/inventory_menu.gd"
 
 [display]
 

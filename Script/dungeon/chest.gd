@@ -141,16 +141,19 @@ func _open_sequence() -> void:
 
 	# 2. Jeu en pause, le personnage lève l'objet
 	get_tree().paused = true
+	# Lancé avant la levée : la montée d'oud accompagne le geste et le gros
+	# accord de cuivres tombe juste après que l'objet est brandi.
+	Sfx.play_ui("item_discover")
 	var rig: Node = p.get("rig")
 	if rig != null and rig.has_method("present_item"):
 		await (rig.present_item(item.build_model()) as Tween).finished
-	Sfx.play_ui("item_get")
 
 	# 3. Panneau : nom, image, description. Attend que le joueur valide.
 	var reveal := ItemReveal.new()
 	get_tree().root.add_child(reveal)
 	reveal.show_item(item)
 	await reveal.closed
+	Inventory.add_item(item)
 
 	# 4. Retour au jeu
 	if rig != null and rig.has_method("end_present"):

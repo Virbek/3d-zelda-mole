@@ -6,7 +6,6 @@ class_name RoomDecor
 ##   - poutres de soutènement contre les murs du fond et des côtés
 ##   - tuyaux rouillés le long du mur du fond
 ##   - bidons dans quelques coins (avec collision : ils arrêtent les tirs)
-##   - poussière en suspension
 ##
 ## Le mur côté caméra (+Z) reste nu : rien de haut ne doit cacher le joueur.
 ## Tout est tiré au sort à partir de la case de la salle : la même salle a
@@ -38,7 +37,6 @@ static func build(r: DungeonRoom, avoid: Array[Vector3]) -> void:
 	d._beams()
 	d._pipes()
 	d._barrels()
-	d._dust()
 
 
 # ---------------------------------------------------------------- OUTILS
@@ -173,7 +171,7 @@ func _barrels() -> void:
 		var base := Vector3(c.x * (hx - 1.1), 0.0, c.y * (hz - 1.1))
 		var n: int = rng.randi_range(1, 3)
 		for i in n:
-			var p: Vector3 = base + Vector3(-c.x * float(i % 2) * 0.75, 0.0, -c.y * float(i / 2) * 0.75)
+			var p: Vector3 = base + Vector3(-c.x * float(i % 2) * 0.75, 0.0, -c.y * floorf(float(i) / 2.0) * 0.75)
 			if not _free(p, 1.6):
 				continue
 			_barrel(p)
@@ -197,34 +195,3 @@ func _barrel(p: Vector3) -> void:
 	_mesh(ToonBuilder.cylinder(0.37, 0.08), Vector3(0.0, 0.62, 0.0), _toon(ToonBuilder.HAZARD), body)
 	_mesh(ToonBuilder.cylinder(0.37, 0.05), Vector3(0.0, 0.25, 0.0), _toon(ToonBuilder.STEEL_DARK), body)
 	body.rotation.y = rng.randf_range(0.0, TAU)
-
-
-# ---------------------------------------------------------------- POUSSIÈRE
-
-func _dust() -> void:
-	var p := CPUParticles3D.new()
-	p.amount = 50
-	p.lifetime = 9.0
-	p.preprocess = 9.0
-	p.local_coords = true
-	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	p.emission_box_extents = Vector3(hx - 1.0, 1.2, hz - 1.0)
-	p.position = Vector3(0.0, 1.4, 0.0)
-	p.direction = Vector3(0.3, 1.0, 0.1)
-	p.spread = 60.0
-	p.initial_velocity_min = 0.05
-	p.initial_velocity_max = 0.2
-	p.gravity = Vector3(0.0, -0.02, 0.0)
-	p.scale_amount_min = 0.6
-	p.scale_amount_max = 1.4
-	var quad := QuadMesh.new()
-	quad.size = Vector2(0.06, 0.06)
-	p.mesh = quad
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	mat.albedo_color = Color(1.0, 0.85, 0.6, 0.45)
-	p.material_override = mat
-	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	room.add_decor(p)

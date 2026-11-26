@@ -117,6 +117,7 @@ func _collect() -> void:
 	if _taken:
 		return
 	_taken = true
+	Sfx.play("health_pickup", global_position, -2.0)
 
 	if _player != null and _player.has_method("heal"):
 		_player.heal(heal_amount)

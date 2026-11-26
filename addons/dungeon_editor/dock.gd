@@ -25,14 +25,17 @@ const ENEMY_TOOLS := [
 	["b", "Kamikaze", Color(1.0, 0.55, 0.15)],
 	["B", "Boss", Color(0.4, 0.45, 1.0)],
 ]
-const KEY_SOURCES := ["Pas de clé", "Coffre (case k) quand la salle est vidée", "Coffre dès l'arrivée", "Coffre quand la salle est vidée"]
+const KEY_SOURCES := ["Pas de coffre", "Coffre (case k) quand la salle est vidée", "Coffre dès l'arrivée", "Coffre quand la salle est vidée"]
+## Dossier des objets proposés dans la liste « Contenu ». Tout .tres
+## ItemData posé ici apparaît automatiquement.
+const ITEMS_DIR := "res://data/items/"
 
 var undo_redo: EditorUndoRedoManager
 var dungeon: Dungeon
 
 # --- Carte ---
 var _cells: Dictionary = {}       ## Vector2i → RoomData (une par case)
-var _links: Dictionary = {}       ## Vector4i (a.x, a.y, b.x, b.y) → verrouillée
+var _links: Dictionary = {}       ## Vector4i (a.x, a.y, b.x, b.y) → Dungeon.DOOR_*
 var _start := Vector2i.ZERO
 var _sel := Vector2i.ZERO         ## salle éditée à droite
 var _has_sel: bool = false
@@ -51,6 +54,8 @@ var _room_canvas: Control
 var _room_opts: Control
 var _respawn: CheckBox
 var _key_src: OptionButton
+var _chest_item: OptionButton
+var _item_paths: Array[String] = []   ## index de la liste - 1 → chemin du .tres
 var _wave_delay: SpinBox
 var _room_drag: bool = false
 var _room_drag_erase: bool = false
@@ -81,7 +86,7 @@ func _build_map_side() -> void:
 	left.add_child(title)
 
 	var help := Label.new()
-	help.text = "Clic gauche sur une case vide : nouvelle salle\nClic gauche sur une salle : l'éditer à droite\nClic droit sur une salle : la supprimer\nClic entre deux salles : mur → porte → porte à clé"
+	help.text = "Clic gauche sur une case vide : nouvelle salle\nClic gauche sur une salle : l'éditer à droite\nClic droit sur une salle : la supprimer\nClic entre deux salles : mur → porte → porte à clé → grille à sens unique (dalle d'un côté, puis de l'autre)\nLe point blanc d'une grille marque le côté de la dalle"
 	help.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	left.add_child(help)
 
@@ -176,7 +181,7 @@ func _build_room_side() -> void:
 	_respawn.toggled.connect(func(on: bool) -> void: _set_room_prop("respawn_enemies", on))
 	opts.add_child(_respawn)
 	var kl := Label.new()
-	kl.text = "Clé :"
+	kl.text = "Coffre :"
 	opts.add_child(kl)
 	_key_src = OptionButton.new()
 	for k in KEY_SOURCES:
@@ -187,6 +192,12 @@ func _build_room_side() -> void:
 		if res != null and (i == RoomData.KeySource.CHEST or i == RoomData.KeySource.CHEST_ON_CLEAR) and not res.layout.contains("C"):
 			_msg_text("Pose un coffre (outil C, calque Décor) : sans lui, il n'y aura pas de coffre en jeu."))
 	opts.add_child(_key_src)
+	var il := Label.new()
+	il.text = "Contenu du coffre :"
+	opts.add_child(il)
+	_chest_item = OptionButton.new()
+	_chest_item.item_selected.connect(_on_chest_item_selected)
+	opts.add_child(_chest_item)
 	var wl := Label.new()
 	wl.text = "Pause entre deux vagues (s) :"
 	opts.add_child(wl)
@@ -258,7 +269,7 @@ func _load_map() -> void:
 	for cell in dungeon.layout_rooms:
 		_cells[cell] = dungeon.layout_rooms[cell]
 	for key in dungeon.layout_doors:
-		_links[key] = dungeon.layout_doors[key] == Dungeon.DOOR_LOCKED
+		_links[key] = dungeon.layout_doors[key]
 	_start = dungeon.start_cell
 	_update_bounds()
 
@@ -319,7 +330,7 @@ func _rooms_dict() -> Dictionary[Vector2i, RoomData]:
 func _doors_dict() -> Dictionary[Vector4i, int]:
 	var d: Dictionary[Vector4i, int] = {}
 	for k in _links:
-		d[k] = Dungeon.DOOR_LOCKED if _links[k] else Dungeon.DOOR_OPEN
+		d[k] = _links[k]
 	return d
 
 
@@ -384,9 +395,21 @@ func _draw_map() -> void:
 					continue
 				var key: Vector4i = _link_key(cell, other)
 				var dc := Color(0.28, 0.28, 0.3)
-				if _links.has(key):
-					dc = Color(0.85, 0.25, 0.2) if _links[key] else Color(0.95, 0.8, 0.3)
-				_map_canvas.draw_rect(_door_rect(cell, other), dc)
+				var v: int = _links.get(key, 0)
+				match v:
+					Dungeon.DOOR_OPEN:
+						dc = Color(0.95, 0.8, 0.3)
+					Dungeon.DOOR_LOCKED:
+						dc = Color(0.85, 0.25, 0.2)
+					Dungeon.DOOR_ONEWAY_A, Dungeon.DOOR_ONEWAY_B:
+						dc = Color(0.45, 0.75, 0.95)
+				var dr: Rect2 = _door_rect(cell, other)
+				_map_canvas.draw_rect(dr, dc)
+				# Grille à sens unique : un point blanc du côté de la dalle
+				if v == Dungeon.DOOR_ONEWAY_A or v == Dungeon.DOOR_ONEWAY_B:
+					var toward: Vector2 = Vector2(other - cell) * (1.0 if v == Dungeon.DOOR_ONEWAY_B else -1.0)
+					var c: Vector2 = dr.get_center() + toward * minf(dr.size.x, dr.size.y) * 0.25
+					_map_canvas.draw_circle(c, 3.0, Color.WHITE)
 
 
 ## Ce qu'il y a sous la souris : ["room", cell] ou ["door", a, b] ou [].
@@ -476,12 +499,18 @@ func _cycle_door(a: Vector2i, b: Vector2i) -> void:
 	_msg_text("")
 	var doors: Dictionary[Vector4i, int] = _doors_dict()
 	var key: Vector4i = _link_key(a, b)
-	if not doors.has(key):
-		doors[key] = Dungeon.DOOR_OPEN
-	elif doors[key] == Dungeon.DOOR_OPEN:
-		doors[key] = Dungeon.DOOR_LOCKED
-	else:
-		doors.erase(key)
+	# mur → porte → porte à clé → grille (dalle côté a) → grille (dalle côté b) → mur
+	match doors.get(key, 0):
+		0:
+			doors[key] = Dungeon.DOOR_OPEN
+		Dungeon.DOOR_OPEN:
+			doors[key] = Dungeon.DOOR_LOCKED
+		Dungeon.DOOR_LOCKED:
+			doors[key] = Dungeon.DOOR_ONEWAY_A
+		Dungeon.DOOR_ONEWAY_A:
+			doors[key] = Dungeon.DOOR_ONEWAY_B
+		_:
+			doors.erase(key)
 	_do_props("Changer une porte", {"layout_doors": doors})
 
 
@@ -562,6 +591,7 @@ func _refresh_room_panel() -> void:
 	_layer.select(clampi(keep, 0, _layer.item_count - 1))
 	_respawn.set_pressed_no_signal(res.respawn_enemies)
 	_key_src.select(int(res.key_source))
+	_fill_item_list(res.chest_item)
 	_wave_delay.set_value_no_signal(res.wave_delay)
 	_updating_ui = false
 
@@ -569,6 +599,42 @@ func _refresh_room_panel() -> void:
 	var d: Vector2i = _grid_dims()
 	_room_canvas.custom_minimum_size = Vector2(d.x * RCELL + RMARGIN * 2.0, d.y * RCELL + RMARGIN * 2.0)
 	_room_canvas.queue_redraw()
+
+
+## Liste « Contenu » : petite clé, puis chaque ItemData du dossier ITEMS_DIR.
+## Relue à chaque affichage : un objet créé entre-temps apparaît tout de suite.
+func _fill_item_list(current: ItemData) -> void:
+	_chest_item.clear()
+	_item_paths.clear()
+	_chest_item.add_item("Petite clé")
+	var selected: int = 0
+	var dir := DirAccess.open(ITEMS_DIR)
+	if dir != null:
+		var files: PackedStringArray = dir.get_files()
+		files.sort()
+		for f: String in files:
+			var file: String = f.trim_suffix(".remap")
+			if not file.ends_with(".tres"):
+				continue
+			var path: String = ITEMS_DIR + file
+			var it := load(path) as ItemData
+			if it == null:
+				continue
+			_item_paths.append(path)
+			_chest_item.add_item(it.display_name)
+			if current != null and current.resource_path == path:
+				selected = _item_paths.size()
+	_chest_item.select(selected)
+
+
+func _on_chest_item_selected(i: int) -> void:
+	var it: ItemData = null
+	if i > 0 and i - 1 < _item_paths.size():
+		it = load(_item_paths[i - 1]) as ItemData
+	_set_room_prop("chest_item", it)
+	var res: RoomData = _room_res()
+	if res != null and res.key_source == RoomData.KeySource.NONE:
+		_msg_text("Choisis aussi quand le coffre apparaît (option « Coffre ») et pose un C dans le décor.")
 
 
 func _on_layer_changed() -> void:
@@ -770,7 +836,7 @@ func _commit_room(prop: String, before: Variant, after: Variant, action: String)
 		elif chest_mode and not has_c:
 			auto_key = RoomData.KeySource.NONE
 	if auto_key >= 0:
-		_msg_text("Option « Clé » réglée sur « %s »." % KEY_SOURCES[auto_key])
+		_msg_text("Option « Coffre » réglée sur « %s »." % KEY_SOURCES[auto_key])
 
 	if undo_redo == null:
 		res.set(prop, after)

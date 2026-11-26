@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="ItemData" format=3]
+
+[ext_resource type="Script" path="res://Script/items/item_data.gd" id="1_cs0dp"]
+
+[resource]
+script = ExtResource("1_cs0dp")
+id = &"energy_fragment"
+category = 2
+display_name = "Fragment de pile d'énergie"
+description = "Un morceau de pile encore chargé. Réunis-en 4 pour gagner une cellule de vie."
+color = Color(0.25, 0.84, 0.88, 1)
