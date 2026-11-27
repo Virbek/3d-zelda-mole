@@ -17,6 +17,8 @@ const DECOR_TOOLS := [
 	["P", "Bloc", Color(0.45, 0.45, 0.48)],
 	["C", "Coffre", Color(0.55, 0.33, 0.15)],
 	["k", "Clé", Color(1.0, 0.82, 0.2)],
+	["S", "Checkpoint", Color(0.25, 0.84, 0.88)],
+	["R", "Piédestal", Color(0.85, 0.75, 1.0)],
 ]
 const ENEMY_TOOLS := [
 	["m", "Corps à corps", Color(0.85, 0.35, 0.3)],

@@ -13,7 +13,9 @@ class_name RoomData
 ## le fond de la salle (nord), le bas est côté caméra. Le plus simple est de
 ## les dessiner à la souris dans le panneau « Donjon » de l'éditeur.
 ##
-##   layout : P pilier   C coffre   k coffre de fin de combat   . vide
+##   layout : P pilier   C coffre   k coffre de fin de combat
+##            S borne de recharge (checkpoint)   R piédestal de relique
+##            . vide
 ##   vagues : c chargeur   s tireur   b kamikaze   m corps à corps   B boss
 
 enum KeySource {
@@ -38,6 +40,9 @@ enum KeySource {
 ## Les ennemis reviennent à chaque nouvelle entrée, même si la salle a déjà été vidée.
 @export var respawn_enemies: bool = false
 @export var spawn_min_from_player: float = 5.0
+## Salle de boss déjà gagnée : quand le joueur possède cet objet clé, le boss
+## revient pour une revanche (une seule fois). Vide = jamais.
+@export var boss_rematch_item: StringName = &"prism"
 
 @export_group("Règles")
 ## Plus utilisé : toute salle avec des ennemis enferme désormais le joueur.
@@ -48,6 +53,8 @@ enum KeySource {
 @export var key_source: KeySource = KeySource.NONE
 ## Ce que contient le coffre. Vide = une petite clé.
 @export var chest_item: ItemData
+## Objet posé sur le piédestal (case « R »). Vide = le prisme.
+@export var pedestal_item: ItemData
 
 @export_group("Disposition")
 ## Piliers, coffre et clé placés case par case (voir en haut du fichier).

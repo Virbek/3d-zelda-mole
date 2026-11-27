@@ -8,13 +8,26 @@ extends CharacterBody3D
 ## se fige puis s'abat. Rester immobile = se faire écraser ; garder du
 ## mouvement = le voir tomber juste derrière soi.
 ##
-## ESCALADE : à chaque tiers de vie perdu, il enchaîne un saut de plus avant
-## de se reposer. La règle ne change jamais, seule la densité augmente — le
-## joueur n'a rien de nouveau à apprendre, il doit juste mieux exécuter.
+## DEUX PHASES : en phase 1, un saut par série. Au seuil de vie (moitié par
+## défaut), il devient intouchable, bondit au centre de la salle, vire au
+## rouge en rugissant, puis attaque en phase 2 : deux sauts par série. La
+## règle ne change jamais, seule la densité augmente — le joueur n'a rien de
+## nouveau à apprendre, il doit juste mieux exécuter.
+##
+## En phase 2, avant de bondir, il fait un MINI-SAUT sur place qui libère une
+## onde de choc circulaire au sol : il faut la passer en esquivant à travers.
+## Ses sauts s'enchaînent aussi plus vite.
+##
+## REVANCHE (une fois le prisme pris) : la salle le refait apparaître, barre
+## pleine. Il attaque d'emblée avec les coups de la phase 2, et chaque
+## atterrissage envoie en plus une fissure en ligne droite vers le joueur.
+## Au seuil de vie, il devient intouchable, revient au centre et martèle le
+## sol : des cailloux tombent alors au hasard dans la salle jusqu'à la fin
+## du combat, pendant qu'il reprend les mêmes coups.
 ##
 ## Il n'utilise pas le jeton d'attaque : il est seul dans son arène.
 
-enum State { IDLE, WINDUP, AIRBORNE, LANDED, REST, HURT, DEAD }
+enum State { IDLE, WINDUP, AIRBORNE, LANDED, REST, HURT, DEAD, TRANSITION, HOP }
 
 signal died
 signal health_changed(current: int, maximum: int)
@@ -55,6 +68,50 @@ signal phase_changed(phase: int)
 @export var jumps_base: int = 1           ## sauts par série au départ
 @export var chain_delay: float = 0.12     ## pause entre deux sauts d'une série
 
+@export_group("Phase 2")
+@export_range(0.05, 0.95) var phase2_threshold: float = 0.5   ## part de vie restante qui déclenche la phase 2
+@export var rage_color := Color(0.85, 0.12, 0.08)
+@export var transition_hop_time: float = 0.9     ## bond jusqu'au centre
+@export var transition_hop_height: float = 4.0
+@export var transition_roar_time: float = 1.4    ## sur place, il vire au rouge
+## Plus nerveux en phase 2 : pause entre deux sauts d'une série et temps au sol
+@export var p2_chain_delay: float = 0.0
+@export var p2_land_time: float = 0.28
+
+@export_group("Phase 2 — onde de choc")
+@export var shockwave_enabled: bool = true
+## false : une onde avant chaque série seulement ; true : avant chaque saut
+@export var shockwave_every_jump: bool = false
+@export var hop_windup: float = 0.55        ## armé du mini-saut (il se tasse et vire à l'orange)
+@export var hop_air_time: float = 0.4       ## durée du mini-saut
+@export var hop_height: float = 1.6
+@export var hop_recover: float = 0.35       ## pause après l'onde, avant le vrai saut
+## L'onde balaie toute la salle : son rayon va jusqu'au coin le plus éloigné.
+## Ce rayon ne sert que si la salle est inconnue.
+@export var shockwave_radius: float = 9.0
+@export var shockwave_speed: float = 10.0   ## m/s : la durée suit la taille de la salle
+@export var shockwave_thickness: float = 0.9
+@export var shockwave_damage: int = 1
+
+## Centre de la salle (facultatif). Vide : la salle de donjon parente, sinon
+## l'endroit où il est apparu.
+@export var arena_center_path: NodePath
+
+@export_group("Revanche")
+## Mis par la salle quand le boss revient après le prisme.
+@export var rematch: bool = false
+@export var line_enabled: bool = true
+@export var line_speed: float = 12.0        ## m/s : un peu plus vite que le sprint
+@export var line_width: float = 1.0
+@export var line_damage: int = 1
+@export var pound_count: int = 4            ## coups de poing au sol au seuil de vie
+@export var pound_period: float = 0.6
+@export var rock_interval: float = 0.55     ## un caillou toutes les X secondes
+@export var rock_radius: float = 1.1
+@export var rock_warn_time: float = 1.1     ## ombre au sol avant l'impact
+@export var rock_damage: int = 1
+@export var rock_wall_margin: float = 1.2
+
 @export_group("Ressenti")
 @export var squash_amount: float = 0.35   ## écrasement à l'armé et à l'impact
 @export var land_shake: float = 0.8
@@ -77,7 +134,14 @@ var health: int
 var player: CharacterBody3D = null
 
 var _t: float = 0.0
-var _phase: int = 0                ## 0, 1, 2 selon les tiers de vie perdus
+var _phase: int = 0                ## 0 = phase 1, 1 = phase 2
+var _home := Vector3.ZERO           ## point d'apparition, centre de repli
+var _trans_from := Vector3.ZERO
+var _trans_to := Vector3.ZERO
+var _trans_landed: bool = false
+var _rage_k: float = 0.0
+var _hop_done: bool = false          ## l'onde de ce saut est déjà partie
+var _hop_landed: bool = false
 var _jumps_left: int = 0
 var _zone: Node3D = null
 var _start_pos := Vector3.ZERO
@@ -94,6 +158,10 @@ var _base_scale := Vector3.ONE
 var _hit_react: HitReaction = null
 var _flash_tween: Tween
 var _model: BossRobotModel = null
+var _rocks_on: bool = false          ## revanche, après le seuil : les cailloux tombent
+var _rock_t: float = 0.0
+var _rematch_split: bool = false     ## le seuil de la revanche est passé
+var _pounds_done: int = 0
 
 
 func _ready() -> void:
@@ -131,6 +199,11 @@ func _ready() -> void:
 		_model.position.y = _mesh_local_bottom
 		mesh.mesh = null
 
+	# Revanche : directement les coups de la phase 2, déjà rouge
+	if rematch:
+		_phase = 1
+		_rage_k = 1.0
+
 	health_changed.emit(health, max_health)
 	phase_changed.emit(_phase)
 
@@ -139,7 +212,11 @@ func _physics_process(delta: float) -> void:
 	if not _ground_resolved:
 		_ground_resolved = true
 		_resolve_ground()
+		# Pas dans _ready : l'arène place le boss après l'avoir ajouté
+		_home = global_position
 	_t += delta
+	if _rocks_on and state != State.DEAD:
+		_rain_rocks(delta)
 	if state != State.AIRBORNE and global_position.y < _ground_y:
 		global_position.y = _ground_y
 	match state:
@@ -155,6 +232,10 @@ func _physics_process(delta: float) -> void:
 			_rest(delta)
 		State.HURT:
 			_hurt(delta)
+		State.TRANSITION:
+			_transition(delta)
+		State.HOP:
+			_hop(delta)
 		State.DEAD:
 			return
 
@@ -164,6 +245,7 @@ func _process(delta: float) -> void:
 	if _model == null:
 		return
 	_model.set_tint(_mat.albedo_color, _base_color)
+	_model.set_rage(_rage_k, rage_color)
 	var pose: String = "rest"
 	var k: float = 0.0
 	match state:
@@ -182,6 +264,31 @@ func _process(delta: float) -> void:
 		State.LANDED:
 			pose = "landed"
 			k = _t / maxf(land_time, 0.01)
+		State.HOP:
+			if _t < hop_windup:
+				pose = "windup"
+				k = _t / maxf(hop_windup, 0.01)
+			elif _t < hop_windup + hop_air_time:
+				pose = "rise" if _t < hop_windup + hop_air_time * 0.5 else "fall"
+				k = (_t - hop_windup) / maxf(hop_air_time, 0.01)
+			else:
+				pose = "landed"
+				k = (_t - hop_windup - hop_air_time) / maxf(hop_recover, 0.01)
+		State.TRANSITION:
+			if _t < transition_hop_time:
+				pose = "hover"
+			elif rematch:
+				# Martèlement : poings levés, puis abattus sur le sol
+				var c: float = fmod(_t - transition_hop_time, pound_period) / pound_period
+				if c < 0.55:
+					pose = "hover"
+				else:
+					pose = "fall"
+					k = 0.25 + (c - 0.55) / 0.45 * 0.75
+			else:
+				# Rugissement : bras qui se tassent comme pour un armé, en tremblant
+				pose = "windup"
+				k = 0.6 + 0.2 * sin(_t * 30.0)
 		State.DEAD:
 			pose = "dead"
 	_model.drive(pose, k, delta)
@@ -201,6 +308,13 @@ func _idle() -> void:
 
 
 func _start_jump() -> void:
+	# Phase 2 : le mini-saut et son onde passent avant le vrai saut
+	if _phase >= 1 and shockwave_enabled and not _hop_done:
+		var first_of_series: bool = _jumps_left >= jumps_base + _phase
+		if shockwave_every_jump or first_of_series:
+			_start_hop()
+			return
+	_hop_done = false
 	_set_state(State.WINDUP)
 	Sfx.play("boss_windup", global_position)
 	_face_player()
@@ -285,6 +399,8 @@ func _impact() -> void:
 	Sfx.play("boss_land", global_position, 3.0)
 	_landed_resolved = false
 	_set_state(State.LANDED)
+	if rematch and line_enabled:
+		_send_line()
 
 
 ## Écrasement puis retour à la normale. Court : c'est une pause de lecture,
@@ -298,13 +414,16 @@ func _landed(_delta: float) -> void:
   	lerpf(1.0 + squash_amount, 1.0, e)
   ))
 
-	if _t < land_time or _landed_resolved:
+	var lt: float = p2_land_time if _phase >= 1 else land_time
+	if _t < lt or _landed_resolved:
 		return
 	_landed_resolved = true
 
 	_jumps_left -= 1
 	if _jumps_left > 0:
-		await get_tree().create_timer(chain_delay).timeout
+		var delay: float = p2_chain_delay if _phase >= 1 else chain_delay
+		if delay > 0.0:
+			await get_tree().create_timer(delay).timeout
 		if state == State.LANDED:
 			_start_jump()
 	else:
@@ -424,7 +543,8 @@ func _shake(strength: float) -> void:
 ## Intouchable en l'air : sinon le joueur le tue en le regardant monter,
 ## et tout le pattern s'effondre.
 func take_hit(direction: Vector3, damage: int = damage_per_hit, _breaks_stun: bool = false) -> void:
-	if state == State.DEAD or state == State.AIRBORNE:
+	# Pendant le passage en phase 2, il est intouchable
+	if state == State.DEAD or state == State.AIRBORNE or state == State.TRANSITION:
 		return
 
 	health = maxi(health - damage, 0)
@@ -442,24 +562,232 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit, _breaks_stun: bo
 	_check_phase()
 
 
-## Un tiers de vie perdu = un saut de plus par série.
+## Seuil atteint : passage en phase 2 (une seule fois).
 func _check_phase() -> void:
-	var lost: float = 1.0 - (float(health) / float(max_health))
-	var p: int = clampi(int(lost * 3.0), 0, 2)
+	if rematch:
+		if _rematch_split or float(health) > float(max_health) * phase2_threshold:
+			return
+		_rematch_split = true
+		phase_changed.emit(2)
+		_start_transition()
+		return
+	if _phase >= 1:
+		return
+	if float(health) > float(max_health) * phase2_threshold:
+		return
+	_phase = 1
+	phase_changed.emit(_phase)
+	_start_transition()
 
-	if p == _phase:
+
+# ---------------------------------------------------------------- PHASE 2
+
+## Mini-saut : armé (cercle d'alerte), petit bond sur place, onde au contact.
+func _start_hop() -> void:
+	_set_state(State.HOP)
+	_hop_landed = false
+	_face_player()
+	Sfx.play("boss_windup", global_position)
+	if _flash_tween != null and _flash_tween.is_running():
+		_flash_tween.kill()
+	_flash_tween = create_tween()
+	_flash_tween.tween_property(_mat, "albedo_color", windup_color, hop_windup * 0.8)
+
+
+func _hop(_delta: float) -> void:
+	velocity = Vector3.ZERO
+	if _t < hop_windup:
+		var k: float = clampf(_t / maxf(hop_windup, 0.01), 0.0, 1.0)
+		_set_mesh_scale(_base_scale * Vector3(1.0 + squash_amount * k * 0.5, 1.0 - squash_amount * k, 1.0 + squash_amount * k * 0.5))
+		_face_player()
 		return
 
-	_phase = p
-	phase_changed.emit(_phase)
-	Sfx.play("boss_phase", global_position, 3.0)
+	var air: float = _t - hop_windup
+	if air < hop_air_time:
+		_mat.albedo_color = _base_color
+		var k: float = air / maxf(hop_air_time, 0.01)
+		global_position.y = _ground_y + hop_height * 4.0 * k * (1.0 - k)
+		_set_mesh_scale(_base_scale * Vector3(0.9, 1.15, 0.9))
+		return
 
-	# Il repart immédiatement : le passage de palier interrompt la respiration
-	if state == State.REST:
+	if not _hop_landed:
+		_hop_landed = true
+		global_position.y = _ground_y
+		_set_mesh_scale(_base_scale * Vector3(1.0 + squash_amount, 1.0 - squash_amount, 1.0 + squash_amount))
+		_shake(land_shake * 0.8)
+		Sfx.play("boss_land", global_position, 3.0)
+		Sfx.play("explosion" if Sfx.sounds.has("explosion") else "boss_land", global_position, 0.0)
+		var feet := Vector3(global_position.x, _ground_y - _feet_offset() + 0.05, global_position.z)
+		var radius: float = _room_reach(feet)
+		ShockwaveRing.spawn(get_tree().current_scene, feet, radius, radius / maxf(shockwave_speed, 0.1), shockwave_thickness, shockwave_damage)
+		return
+
+	var rec: float = clampf((air - hop_air_time) / maxf(hop_recover, 0.01), 0.0, 1.0)
+	_set_mesh_scale(_base_scale * Vector3(lerpf(1.0 + squash_amount, 1.0, rec), lerpf(1.0 - squash_amount, 1.0, rec), lerpf(1.0 + squash_amount, 1.0, rec)))
+	if rec >= 1.0:
+		_hop_done = true
+		_start_jump()
+
+
+## Distance entre `from` et le coin de la salle le plus éloigné : l'onde
+## couvre toute la pièce, où que le boss se trouve.
+func _room_reach(from: Vector3) -> float:
+	var parent := get_parent() as Node3D
+	if parent == null or not ("room_size" in parent):
+		return shockwave_radius
+	var size: Vector2 = parent.get("room_size")
+	var c: Vector3 = parent.global_position
+	var reach: float = 0.0
+	for sx: float in [-0.5, 0.5]:
+		for sz: float in [-0.5, 0.5]:
+			var corner := Vector2(c.x + size.x * sx, c.z + size.y * sz)
+			reach = maxf(reach, corner.distance_to(Vector2(from.x, from.z)))
+	return reach + shockwave_thickness
+
+
+## Il coupe tout ce qu'il faisait, devient intouchable et bondit au centre.
+func _start_transition() -> void:
+	if _flash_tween != null and _flash_tween.is_running():
+		_flash_tween.kill()
+	_mat.albedo_color = _base_color
+	if _zone != null and is_instance_valid(_zone):
+		_zone.queue_free()
+		_zone = null
+	_set_mesh_scale(_base_scale)
+	_trans_from = global_position
+	_trans_to = _arena_center()
+	_trans_to.y = _ground_y
+	_trans_landed = false
+	_pounds_done = 0
+	_set_state(State.TRANSITION)
+	Sfx.play("boss_jump", global_position, 2.0)
+	_shake(0.5)
+
+
+func _arena_center() -> Vector3:
+	if not arena_center_path.is_empty():
+		var n := get_node_or_null(arena_center_path) as Node3D
+		if n != null:
+			return n.global_position
+	# Salle de donjon ou arène : leur origine est le centre de la pièce
+	var parent := get_parent() as Node3D
+	if parent != null and (parent is DungeonRoom or "room_size" in parent):
+		return parent.global_position
+	return _home
+
+
+func _transition(_delta: float) -> void:
+	velocity = Vector3.ZERO
+	if _t < transition_hop_time:
+		# Bond en cloche jusqu'au centre
+		var k: float = clampf(_t / maxf(transition_hop_time, 0.01), 0.0, 1.0)
+		var e: float = k * k * (3.0 - 2.0 * k)
+		var p: Vector3 = _trans_from.lerp(_trans_to, e)
+		p.y = _ground_y + transition_hop_height * 4.0 * k * (1.0 - k)
+		global_position = p
+		_face_player()
+		return
+
+	if not _trans_landed:
+		_trans_landed = true
+		global_position = _trans_to
+		_set_mesh_scale(_base_scale * Vector3(1.0 + squash_amount, 1.0 - squash_amount, 1.0 + squash_amount))
+		Sfx.play("boss_land", global_position, 3.0)
+		Sfx.play("boss_phase", global_position, 3.0)
+		_shake(land_shake)
+
+	if rematch:
+		_pound()
+		return
+
+	# Rugissement : il vire progressivement au rouge en tremblant
+	var r: float = clampf((_t - transition_hop_time) / maxf(transition_roar_time, 0.01), 0.0, 1.0)
+	_rage_k = r
+	var wobble: float = sin(_t * 40.0) * 0.04 * (1.0 - r * 0.5)
+	_set_mesh_scale(_base_scale * Vector3(1.0 + wobble, 1.0 - wobble, 1.0 + wobble))
+	_face_player()
+	if int(_t * 10.0) % 3 == 0:
+		_shake(0.12)
+
+	if r >= 1.0:
+		_rage_k = 1.0
+		_set_mesh_scale(_base_scale)
 		_jumps_left = jumps_base + _phase
 		_start_jump()
 
-	_shake(0.5)
+
+# ---------------------------------------------------------------- REVANCHE
+
+## Fissure en ligne droite, de ses pieds vers le joueur.
+func _send_line() -> void:
+	var feet := Vector3(global_position.x, _ground_y - _feet_offset() + 0.02, global_position.z)
+	var dir: Vector3 = player.global_position - feet
+	dir.y = 0.0
+	if dir.length() < 0.01:
+		dir = -global_basis.z
+	FissureLine.spawn(get_tree().current_scene, feet, dir, _wall_distance(feet, dir.normalized()), line_speed, line_width, line_damage)
+
+
+## Distance de `from` au mur de la salle en suivant `dir` : la fissure
+## s'arrête au mur au lieu de le traverser.
+func _wall_distance(from: Vector3, dir: Vector3) -> float:
+	var parent := get_parent() as Node3D
+	if parent == null or not ("room_size" in parent):
+		return shockwave_radius
+	var size: Vector2 = parent.get("room_size")
+	var c: Vector3 = parent.global_position
+	var best: float = INF
+	if absf(dir.x) > 0.001:
+		var wx: float = c.x + size.x * 0.5 * signf(dir.x)
+		best = minf(best, (wx - from.x) / dir.x)
+	if absf(dir.z) > 0.001:
+		var wz: float = c.z + size.y * 0.5 * signf(dir.z)
+		best = minf(best, (wz - from.z) / dir.z)
+	return maxf(best - 0.4, 0.5)
+
+
+## Au centre, il frappe le sol à plusieurs reprises. Le premier coup fait
+## tomber les cailloux ; après le dernier, il reprend ses sauts.
+func _pound() -> void:
+	var local: float = _t - transition_hop_time
+	var c: float = fmod(local, pound_period) / pound_period
+	var n: int = int(local / pound_period)
+	# Écrasement au moment où les poings touchent le sol
+	var squash: float = clampf(1.0 - (c - 0.8) * 5.0, 0.0, 1.0) if c >= 0.8 else 0.0
+	_set_mesh_scale(_base_scale * Vector3(1.0 + squash * 0.2, 1.0 - squash * 0.2, 1.0 + squash * 0.2))
+	_face_player()
+	if n >= _pounds_done and c >= 0.8 and _pounds_done < pound_count:
+		_pounds_done += 1
+		Sfx.play("boss_land", global_position, 2.0)
+		_shake(land_shake * 0.6)
+		if not _rocks_on:
+			_rocks_on = true
+			_rock_t = 0.0
+	if local >= pound_period * float(pound_count) + 0.2:
+		_set_mesh_scale(_base_scale)
+		_jumps_left = jumps_base + _phase
+		_start_jump()
+
+
+func _rain_rocks(delta: float) -> void:
+	_rock_t -= delta
+	if _rock_t > 0.0:
+		return
+	_rock_t = rock_interval * randf_range(0.7, 1.3)
+	var ground := Vector3(0.0, _ground_y - _feet_offset() + 0.02, 0.0)
+	var parent := get_parent() as Node3D
+	if parent != null and "room_size" in parent:
+		var size: Vector2 = parent.get("room_size")
+		var hx: float = size.x * 0.5 - rock_wall_margin
+		var hz: float = size.y * 0.5 - rock_wall_margin
+		ground.x = parent.global_position.x + randf_range(-hx, hx)
+		ground.z = parent.global_position.z + randf_range(-hz, hz)
+	else:
+		var a: float = randf() * TAU
+		var d: float = sqrt(randf()) * shockwave_radius
+		ground.x = _home.x + cos(a) * d
+		ground.z = _home.z + sin(a) * d
+	FallingRock.spawn(get_tree().current_scene, ground, rock_radius, rock_warn_time, rock_damage)
 
 
 func stun(_duration: float) -> void:
@@ -492,6 +820,7 @@ func _die() -> void:
 		_hit_react.stop()
 	# Repli sur le cri d'ennemi tant que boss_death.wav n'existe pas
 	Sfx.play("boss_death" if Sfx.sounds.has("boss_death") else "enemy_death", global_position, 4.0)
+	_rocks_on = false
 	_set_state(State.DEAD)
 	died.emit()
 

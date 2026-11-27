@@ -77,6 +77,11 @@ signal room_changed(cell: Vector2i)
 	set(v):
 		wall_height = v
 		queue_preview()
+## Hauteur visible du mur du fond (toile de fond, la collision reste à wall_height).
+@export var back_wall_height: float = 6.5:
+	set(v):
+		back_wall_height = v
+		queue_preview()
 @export var wall_thickness: float = 1.0:
 	set(v):
 		wall_thickness = v
@@ -172,6 +177,7 @@ func _ready() -> void:
 	_apply_ambiance()
 	_start_ambient_sound()
 	_build()
+	_restore_progress()
 	keys_changed.emit(keys)
 	# Différé : le joueur a peut-être été replacé au checkpoint dans son _ready
 	_enter_first_room.call_deferred()
@@ -429,6 +435,7 @@ func _build() -> void:
 		room.cell = cell
 		room.room_size = room_size
 		room.wall_height = wall_height
+		room.back_wall_height = back_wall_height
 		room.wall_thickness = wall_thickness
 		room.door_width = door_width
 		room.door_height = door_height
@@ -602,6 +609,7 @@ func _on_door_entered(door: DungeonDoor) -> void:
 ## Dalle d'une grille à sens unique : la grille s'ouvre pour de bon. Si un
 ## combat enferme la salle, elle attend la fin des vagues comme les autres.
 func _on_door_plate_pressed(door: DungeonDoor) -> void:
+	(_progress()["doors"] as Dictionary)[door.name] = true
 	for d in _closed:
 		if d.connects(_current):
 			_closed.append(door)
@@ -618,6 +626,9 @@ func _on_door_unlock_requested(door: DungeonDoor) -> void:
 		return
 	keys -= 1
 	keys_changed.emit(keys)
+	var prog: Dictionary = _progress()
+	prog["keys"] = keys
+	(prog["doors"] as Dictionary)[door.name] = true
 	if player.has_method("begin_interaction"):
 		player.begin_interaction(door.global_position)
 	await door.play_unlock(player.global_position)
@@ -690,6 +701,7 @@ func _auto_walk(target: Vector3, d: Vector3) -> void:
 # ---------------------------------------------------------------- ÉVÉNEMENTS DE SALLE
 
 func _on_room_cleared(room: DungeonRoom) -> void:
+	(_progress()["cleared"] as Dictionary)[room.cell] = true
 	if room.cell == _current:
 		_play_clear_feedback()
 		_reopen_closed()
@@ -704,9 +716,47 @@ func _play_clear_feedback() -> void:
 		cam.get_parent().shake(0.4)
 
 
-func _on_key_collected(_room: DungeonRoom) -> void:
+func _on_key_collected(room: DungeonRoom) -> void:
 	keys += 1
 	keys_changed.emit(keys)
+	var prog: Dictionary = _progress()
+	prog["keys"] = keys
+	(prog["key_given"] as Dictionary)[room.cell] = true
+
+
+# ---------------------------------------------------------------- PROGRESSION
+
+## Progression mémorisée de CE donjon (créée vide au premier passage). Vit
+## dans l'autoload Checkpoints : une mort recharge la scène, pas l'autoload.
+func _progress() -> Dictionary:
+	var scene: Node = get_tree().current_scene
+	var id: String = "%s|%s" % [scene.scene_file_path if scene != null else "", get_path()]
+	if not Checkpoints.dungeon_progress.has(id):
+		Checkpoints.dungeon_progress[id] = {
+			"keys": 0,
+			"cleared": {},     ## Vector2i → true : salles nettoyées
+			"key_given": {},   ## Vector2i → true : clé de la salle déjà ramassée
+			"doors": {},       ## nom de porte → true : déverrouillée / grille ouverte
+		}
+	return Checkpoints.dungeon_progress[id]
+
+
+## Après une mort : on remet le donjon dans l'état où le joueur l'a laissé.
+## Les ennemis des salles nettoyées ne reviennent pas (sauf si la salle est
+## réglée sur « les ennemis reviennent à chaque visite »).
+func _restore_progress() -> void:
+	var prog: Dictionary = _progress()
+	keys = int(prog["keys"])
+	var cleared: Dictionary = prog["cleared"]
+	var key_given: Dictionary = prog["key_given"]
+	for cell: Vector2i in _rooms:
+		if cleared.has(cell) or key_given.has(cell):
+			(_rooms[cell] as DungeonRoom).restore_progress(cleared.has(cell), key_given.has(cell))
+	var opened: Dictionary = prog["doors"]
+	for d in _doors:
+		if opened.has(d.name):
+			d.set_state_instant(DungeonDoor.DoorState.OPEN)
+		d.has_key = keys > 0
 
 
 ## Les portes affichent « Ouvrir (clé) » ou « il faut une clé » selon le stock.

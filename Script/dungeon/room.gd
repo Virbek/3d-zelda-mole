@@ -41,7 +41,7 @@ var with_decor: bool = true
 
 ## Lampes murales : seule vraie source de lumière de la raffinerie ensevelie
 const LAMP_COLOR := Color(1.0, 0.62, 0.3)
-const LAMP_ENERGY := 0.4
+const LAMP_ENERGY := 0.65
 const LAMP_RANGE := 7.0
 ## 1 = décroissance douce. Plus haut, la lumière se concentre en un point
 ## chaud sous l'applique (halo trop marqué sur le mur et le sol).
@@ -49,10 +49,13 @@ const LAMP_FALLOFF := 1.0
 
 var chunk_length: float = 2.0
 
-## Vue de la caméra, les murs côté caméra cachaient la salle : le mur du bas
-## (+Z) n'est plus qu'un muret, et les murs de côté descendent en escalier
-## vers lui. Les collisions, elles, gardent toute la hauteur.
+## Caméra en perspective, au-dessus de la salle : les murs de côté montrent
+## leur face intérieure et ne cachent rien. Seul le mur du bas (+Z), vu de
+## dessus, n'est qu'un muret. Les collisions gardent toute la hauteur.
 var ledge_height: float = 0.8
+## Hauteur visible des murs du fond et des côtés. Plus haute que la
+## collision, elle bouche le vide que la perspective laisse voir au-dessus.
+var back_wall_height: float = 6.5
 
 ## Décalage des pièces posées sur un mur ou un pilier, pour qu'aucune face
 ## ne soit exactement au même niveau qu'une autre (sinon elles scintillent).
@@ -74,6 +77,9 @@ var _pillars: Array[Vector3] = []
 var _pillar_radius: float = 0.6
 var _chest_pos := Vector3.ZERO           ## case « C » du layout, centre sinon
 var _key_pos := Vector3.ZERO             ## case « k » du layout, centre sinon
+var _post_positions: Array[Vector3] = [] ## cases « S » du layout : bornes de recharge (checkpoints)
+var _rematch: bool = false                ## le combat en cours est la revanche du boss
+var _pedestal_positions: Array[Vector3] = [] ## cases « R » du layout : piédestaux de relique
 var _wave: int = 0                       ## index de la vague en cours
 var _activation: int = 0                 ## change à chaque entrée/sortie : annule les vagues en attente
 
@@ -116,7 +122,11 @@ func build() -> void:
 		var avoid: Array[Vector3] = _pillars.duplicate()
 		avoid.append(_chest_pos)
 		avoid.append(_key_pos)
+		avoid.append_array(_post_positions)
+		avoid.append_array(_pedestal_positions)
 		RoomDecor.build(self, avoid)
+	_spawn_charge_posts()
+	_spawn_pedestals()
 	_build_veil()
 
 	# Le coffre est là où un « C » est dessiné dans le décor, et nulle part
@@ -150,8 +160,14 @@ func _build_wall(dir: Vector2i, length: float, center: Vector3, along_x: bool, t
 	if lintel_h > 0.01:
 		var lp: Vector3 = center + Vector3(0.0, door_height + lintel_h * 0.5, 0.0)
 		var ls := Vector3(door_width, lintel_h, thick) if along_x else Vector3(thick, lintel_h, door_width)
-		# Au-dessus d'un muret, un linteau flotterait : collision seule
-		var lintel_visual: float = -1.0 if _visual_wall_height(dir, lp) >= wall_height else 0.0
+		# Au-dessus d'un muret, un linteau flotterait : collision seule.
+		# Sur un mur plus haut que la collision, il monte jusqu'en haut.
+		var vh: float = _visual_wall_height(dir, lp)
+		var lintel_visual: float = 0.0
+		if vh > wall_height:
+			lintel_visual = vh - door_height
+		elif vh >= wall_height:
+			lintel_visual = -1.0
 		_add_box(n + "_Lintel", ls, lp, wall_color, true, lintel_visual)
 
 
@@ -164,25 +180,18 @@ func _add_wall_run(n: String, length: float, center: Vector3, along_x: bool, thi
 		var p: Vector3 = center + (Vector3(off, 0.0, 0.0) if along_x else Vector3(0.0, 0.0, off))
 		var size := Vector3(piece, wall_height, thick) if along_x else Vector3(thick, wall_height, piece)
 		var vh: float = _visual_wall_height(dir, p)
-		var mesh := _add_box("%s_%d" % [n, i], size, p, wall_color, true, vh if vh < wall_height else -1.0)
+		var mesh := _add_box("%s_%d" % [n, i], size, p, wall_color, true, vh if not is_equal_approx(vh, wall_height) else -1.0)
 		if mesh != null:
-			_add_wall_cap(mesh, size, minf(vh, wall_height))
+			_add_wall_cap(mesh, size, vh)
 
 
-## Hauteur visible d'un tronçon de mur. Fond : pleine hauteur. Bas (+Z) :
-## muret. Côtés : pleine hauteur jusqu'au milieu (les portes y sont), puis
-## en escalier jusqu'au muret, côté caméra.
-func _visual_wall_height(dir: Vector2i, p: Vector3) -> float:
+## Hauteur visible d'un tronçon de mur. Bas (+Z) : muret, vu de dessus.
+## Fond et côtés : une seule hauteur, sans palier. En perspective, les côtés
+## montrent leur face intérieure et ne cachent rien.
+func _visual_wall_height(dir: Vector2i, _p: Vector3) -> float:
 	if dir == Vector2i(0, 1):
 		return ledge_height
-	if dir.x != 0:
-		var hz: float = room_size.y * 0.5
-		var start: float = door_width * 0.5 + 0.5   # au-delà de l'embrasure des portes latérales
-		if p.z <= start:
-			return wall_height
-		var t: float = clampf((p.z - start) / maxf(hz - start, 0.01), 0.0, 1.0)
-		return lerpf(wall_height, ledge_height, t)
-	return wall_height
+	return maxf(back_wall_height, wall_height)
 
 
 ## Arête de roche plus sombre sur le dessus d'un tronçon : vue de haut, le
@@ -250,8 +259,12 @@ func _build_layout() -> void:
 				_chest_pos = pos
 			"k":
 				_key_pos = pos
+			"S":
+				_post_positions.append(pos)
+			"R":
+				_pedestal_positions.append(pos)
 			_:
-				push_warning("%s : caractère '%s' inconnu dans layout (P C k .)" % [name, c["ch"]])
+				push_warning("%s : caractère '%s' inconnu dans layout (P C k S R .)" % [name, c["ch"]])
 		i += 1
 
 
@@ -271,14 +284,10 @@ func _build_pillars() -> void:
 		_decorate_pillar(pillar, ps, ph)
 
 
-## Comme les murs de côté : intacts au fond, tronqués côté caméra (des
-## colonnes effondrées) pour ne pas masquer la salle.
-func _pillar_visual_height(p: Vector3) -> float:
-	var hz: float = room_size.y * 0.5
-	if p.z <= 0.0:
-		return wall_height
-	var t: float = clampf(p.z / maxf(hz, 0.01), 0.0, 1.0)
-	return lerpf(wall_height, 1.6, t)
+## En perspective, un pilier ne masque presque rien : pleine hauteur
+## partout. Le rare pilier gênant est estompé par la caméra.
+func _pillar_visual_height(_p: Vector3) -> float:
+	return wall_height
 
 
 ## Colonne de soutènement de la raffinerie : socle de roche, fût rouillé,
@@ -362,7 +371,11 @@ func _add_lamp(pos: Vector3, facing: Vector3) -> void:
 	light.light_energy = LAMP_ENERGY
 	light.omni_range = LAMP_RANGE
 	light.omni_attenuation = LAMP_FALLOFF
-	light.shadow_enabled = false   # beaucoup de lampes : on garde l'ombre au soleil
+	# Les ombres viennent des lampes, pas du soleil : elles partent bien de la
+	# source qu'on voit. Seules les lampes de la salle courante sont allumées.
+	light.shadow_enabled = true
+	light.shadow_blur = 1.5
+	light.shadow_bias = 0.08
 	# Écartée du mur : sinon le mur juste sous la lampe brûle
 	light.position = Vector3(0.0, 0.2, -1.3)
 	lamp.add_child(light)
@@ -516,6 +529,9 @@ func activate(entry: Vector3) -> int:
 	_activation += 1
 	_wave = 0
 	if is_cleared and not data.respawn_enemies:
+		if _rematch_ready():
+			_spawn_rematch()
+			return _alive
 		return 0
 
 	if data.waves.is_empty():
@@ -531,6 +547,7 @@ func activate(entry: Vector3) -> int:
 func deactivate() -> void:
 	is_active = false
 	_activation += 1   # une vague en attente ne doit pas apparaître après le départ
+	_rematch = false
 	for e in _enemies:
 		if is_instance_valid(e):
 			e.queue_free()
@@ -577,7 +594,44 @@ func _spawn_random(entry: Vector3) -> void:
 		_spawn("boss", p)
 
 
-func _spawn(kind: String, local_pos: Vector3) -> void:
+## Revanche : salle de boss déjà gagnée, objet déclencheur en poche, et
+## revanche pas encore remportée.
+func _rematch_ready() -> bool:
+	if Engine.is_editor_hint() or data.boss_rematch_item == &"":
+		return false
+	if not _has_boss():
+		return false
+	return Inventory.has_key_item(data.boss_rematch_item) and not Inventory.has_flag(_rematch_id())
+
+
+func _has_boss() -> bool:
+	if data.boss:
+		return true
+	for w in data.waves:
+		if w.contains("B"):
+			return true
+	return false
+
+
+func _rematch_id() -> String:
+	return "%s|boss_rematch" % _chest_id()
+
+
+## Seul le boss revient, sur sa case « B » (au centre sinon).
+func _spawn_rematch() -> void:
+	_enemies.clear()
+	_alive = 0
+	_rematch = true
+	var pos := Vector3.ZERO
+	var dims: Vector2i = grid_dims()
+	for w in data.waves:
+		for c in RoomData.parse_grid(w)["cells"]:
+			if c["ch"] == "B":
+				pos = grid_to_local(c["col"], c["row"], dims.x, dims.y)
+	_spawn("boss", pos, {"rematch": true})
+
+
+func _spawn(kind: String, local_pos: Vector3, props: Dictionary = {}) -> void:
 	var scene: PackedScene = scenes.get(kind)
 	if scene == null:
 		push_warning("%s : scène '%s' manquante dans le Dungeon" % [name, kind])
@@ -600,6 +654,8 @@ func _spawn(kind: String, local_pos: Vector3) -> void:
 	var e: Node3D = scene.instantiate()
 	# Avant add_child : les ennemis lisent player_path dans leur _ready
 	e.set("player_path", player.get_path())
+	for k in props:
+		e.set(k, props[k])
 	add_child(e)
 	e.position = local_pos + Vector3.UP * 0.05
 	_enemies.append(e)
@@ -641,6 +697,13 @@ func _on_enemy_died() -> void:
 	_alive -= 1
 	if _alive > 0 or not is_active:
 		return
+	if _rematch:
+		# Revanche gagnée : elle ne revient plus, même après une mort
+		_rematch = false
+		Inventory.set_flag(_rematch_id())
+		Sfx.play_ui("room_clear")
+		_on_all_dead()
+		return
 	if _wave + 1 < data.waves.size():
 		_next_wave()
 	else:
@@ -681,6 +744,48 @@ func _give_reward() -> void:
 		RoomData.KeySource.CHEST_ON_CLEAR:
 			if _chest == null and _has_chest():
 				_spawn_chest.call_deferred(_chest_pos, true)
+
+
+## Remet la salle dans l'état mémorisé par le donjon après une mort :
+## nettoyée (plus d'ennemis), et coffre déjà présent / déjà ouvert.
+func restore_progress(cleared: bool, key_given: bool) -> void:
+	is_cleared = cleared
+	_key_given = key_given
+	# Coffre qui n'apparaît qu'à la fin du combat : il est déjà là
+	if cleared and _chest == null:
+		match data.key_source:
+			RoomData.KeySource.ON_CLEAR:
+				_spawn_chest(_key_pos if data.layout.contains("k") else _chest_pos)
+			RoomData.KeySource.CHEST_ON_CLEAR:
+				if _has_chest():
+					_spawn_chest(_chest_pos)
+	# Clé déjà prise : le coffre reste ouvert et vide
+	if key_given and _chest != null and not _chest.is_open:
+		_chest.set_open_instant()
+
+
+## Une borne de recharge (checkpoint) par case « S » du décor.
+func _spawn_charge_posts() -> void:
+	for i in _post_positions.size():
+		var post := ChargePost.new()
+		post.name = "ChargePost%d" % i
+		post.position = _post_positions[i]   # avant add_child : la borne lit sa position dans _ready
+		add_child(post)
+		_pieces.append(post)
+
+
+## Un piédestal par case « R » du décor. Son objet n'est donné qu'une fois
+## pour toute la partie (mémorisé comme un coffre ouvert).
+func _spawn_pedestals() -> void:
+	for i in _pedestal_positions.size():
+		var ped := RelicPedestal.new()
+		ped.name = "Pedestal%d" % i
+		ped.item = data.pedestal_item   # vide = le prisme
+		ped.position = _pedestal_positions[i]
+		if not Engine.is_editor_hint():
+			ped.save_id = "%s|R%d" % [_chest_id(), i]
+		add_child(ped)
+		_pieces.append(ped)
 
 
 ## Coffre seulement si le décor en contient un.

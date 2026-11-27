@@ -41,6 +41,10 @@ var _eye_mat: StandardMaterial3D
 var _flame_mat: StandardMaterial3D
 var _head: Node3D
 var _tinted: Array = []               ## [ShaderMaterial, Color]
+## Rage (phase 2) : 0 = couleurs d'origine, 1 = carcasse virée au rouge
+var _rage: float = 0.0
+var _rage_color := Color(0.85, 0.12, 0.08)
+@export var rage_strength: float = 0.6   ## part de rouge sur la carcasse en rage complète
 var _angle := Vector2(7.0, 0.0)
 var _flame_k: float = 0.0
 var _t: float = 0.0
@@ -108,8 +112,14 @@ func set_tint(current: Color, base: Color) -> void:
 	var w: float = clampf(diff / 0.6, 0.0, 1.0) * tint_strength
 	for entry in _tinted:
 		var mat: ShaderMaterial = entry[0]
-		var c: Color = entry[1]
+		var c: Color = (entry[1] as Color).lerp(_rage_color, _rage * rage_strength)
 		mat.set_shader_parameter("albedo_color", c.lerp(Color(current, 1.0), w))
+
+
+## Phase 2 : la carcasse vire au rouge et les yeux passent du cyan au rouge.
+func set_rage(k: float, color: Color) -> void:
+	_rage = clampf(k, 0.0, 1.0)
+	_rage_color = color
 
 
 ## -1 = éteint (mort), 0 = cyan (machine active), 1 = orange (menace).
@@ -120,7 +130,7 @@ func _set_threat(k: float) -> void:
 		_eye_mat.albedo_color = ToonBuilder.STEEL_DARK
 		_nozzle_mat.albedo_color = ToonBuilder.STEEL_DARK
 		return
-	var c: Color = ToonBuilder.SCREEN.lerp(ToonBuilder.THREAT, k)
+	var c: Color = ToonBuilder.SCREEN.lerp(_rage_color.lightened(0.25), _rage).lerp(ToonBuilder.THREAT, k)
 	_eye_mat.albedo_color = c
 	_nozzle_mat.albedo_color = c
 

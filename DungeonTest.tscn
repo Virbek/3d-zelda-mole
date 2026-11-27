@@ -13,6 +13,7 @@
 [ext_resource type="Script" uid="uid://bu30rgwlf06jo" path="res://Script/player/secondaire_lock.gd" id="11_732mr"]
 [ext_resource type="Script" uid="uid://kb0xlm3pja7l" path="res://Script/dungeon/dungeon.gd" id="12_2q2ox"]
 [ext_resource type="Script" uid="uid://dkidb0h74y22x" path="res://Script/dungeon/room_data.gd" id="13_6mr3n"]
+[ext_resource type="Resource" path="res://data/items/energy_fragment.tres" id="14_qxi6t"]
 [ext_resource type="Script" uid="uid://dmtpekyk2plo8" path="res://Script/dungeon/underground_ambiance.gd" id="19_tn7my"]
 [ext_resource type="PackedScene" uid="uid://b34mk8qpxnm3e" path="res://prefab/Enemy/Enemy.tscn" id="21_mrayk"]
 [ext_resource type="PackedScene" uid="uid://c732lgsxwdwcw" path="res://prefab/Enemy/EnemyShooter.tscn" id="22_kxf2b"]
@@ -84,6 +85,7 @@ waves = PackedStringArray()
 [sub_resource type="Resource" id="Resource_voy1d"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray("..........\n..........\n....s.....\n..........\n..........\n..........\n..........\n..........")
+chest_item = ExtResource("14_qxi6t")
 layout = "..........
 ..........
 ..........
@@ -96,6 +98,15 @@ layout = "..........
 [sub_resource type="Resource" id="Resource_qfhbt"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray("..........\n..........\n...m......\n..........\n..........\n...m......\n..........\n..........")
+chest_item = ExtResource("14_qxi6t")
+layout = "..........
+..........
+..........
+..........
+..........
+..........
+..........
+.........."
 
 [sub_resource type="Resource" id="Resource_0j4la"]
 script = ExtResource("13_6mr3n")
@@ -125,10 +136,10 @@ layout = ".....C....
 [sub_resource type="Resource" id="Resource_tn7my"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray("..........\n..........\n..........\n..........\n....m.....\n..........\n..........\n..........")
-key_source = 2
+chest_item = ExtResource("14_qxi6t")
 layout = "..........
 ..........
-...C......
+..........
 ..........
 ..........
 ..........
@@ -138,6 +149,7 @@ layout = "..........
 [sub_resource type="Resource" id="Resource_sjtd8"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray()
+chest_item = ExtResource("14_qxi6t")
 layout = "..........
 .P......P.
 ..........
@@ -151,43 +163,101 @@ layout = "..........
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray()
 
-[sub_resource type="Resource" id="Resource_6mr3n"]
+[sub_resource type="Resource" id="Resource_3ukw0"]
 script = ExtResource("13_6mr3n")
-waves = PackedStringArray("..........\n..........\n....B.....\n..........\n..........\n..........\n..........\n..........")
+waves = PackedStringArray()
 
-[sub_resource type="Resource" id="Resource_jhej5"]
+[sub_resource type="Resource" id="Resource_kslcm"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_6mr3n"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray()
 
 [sub_resource type="Resource" id="Resource_2q2ox"]
 script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
+waves = PackedStringArray("..........\n..........\n..........\n....c.....\n..........\n..........\n..........\n..........", "..........\n..........\n..c...c...\n..........\n..........\n..........\n..........\n..........")
+
+[sub_resource type="Resource" id="Resource_jhej5"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray("..........\n.s......s.\n..........\n.....m....\n..........\n..........\n.s......s.\n..........")
+layout = "..........
+..........
+..PPP.....
+..........
+..........
+.....PPP..
+..........
+.........."
 
 [sub_resource type="Resource" id="Resource_inaek"]
 script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
+waves = PackedStringArray("..........\n..........\n..c....c..\n..........\n..........\n..c....c..\n..........\n..........")
 
 [sub_resource type="Resource" id="Resource_babem"]
 script = ExtResource("13_6mr3n")
+waves = PackedStringArray("..........\n..........\n....mm....\n..........\n..s....s..\n..........\n..........\n..........", "..........\n..........\n..c....c..\n.....m....\n..........\n..........\n..........\n..........", "..........\n..m....m..\n..........\n..........\n..m....m..\n..........\n..........\n..........")
+key_source = 1
+chest_item = ExtResource("14_qxi6t")
+layout = "..........
+..........
+..........
+..........
+..........
+....C.....
+..........
+.........."
+
+[sub_resource type="Resource" id="Resource_k4orh"]
+script = ExtResource("13_6mr3n")
 waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_py2qv"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+layout = "..........
+..........
+..........
+....R.....
+..........
+..........
+..........
+.........."
 
 [sub_resource type="Resource" id="Resource_km5kn"]
 script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
+waves = PackedStringArray("..........\n..........\n..........\n....B.....\n..........\n..........\n..........\n..........")
 
 [sub_resource type="Resource" id="Resource_smvt8"]
 script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
+waves = PackedStringArray("..........\n..........\n....m.....\n..........\n....m.....\n..........\n..........\n..........", "..........\n......c...\n..........\n..m.......\n..........\n......c...\n..........\n..........")
+layout = "...S......
+..........
+..........
+..........
+..........
+..........
+..........
+.........."
 
 [sub_resource type="Resource" id="Resource_gf3r8"]
 script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
+waves = PackedStringArray("..........\n..........\n..........\n....c.....\n..........\n...sss....\n..........\n..........")
 
 [sub_resource type="Resource" id="Resource_fbwgl"]
 script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
+waves = PackedStringArray("..........\n..........\n...m..m...\n..........\n..........\n.c.....c..\n..........\n..........", "..........\n..........\n..c....s..\n..........\n..........\n..s....c..\n..........\n..........")
 
 [sub_resource type="Resource" id="Resource_7wi2t"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_m3nkq"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_kde0i"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray()
 
@@ -197,17 +267,46 @@ waves = PackedStringArray()
 
 [sub_resource type="Resource" id="Resource_3v7c6"]
 script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
+waves = PackedStringArray("..........\n...s......\n..........\n..m..m....\n.......m..\n...m......\n..........\n..........", "..........\n...s...s..\n..........\n..m.......\n......m...\n....m.....\n..........\n..........", "..........\n.s........\ns.........\n..m...m...\n....cc....\n..........\n..........\n..........")
+key_source = 2
+layout = "..........
+.....C....
+..........
+..........
+..........
+..........
+..........
+.........."
 
 [sub_resource type="Resource" id="Resource_hxfd1"]
 script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
+waves = PackedStringArray("..........\n...s.s....\n..........\n..c...c...\n....m.....\n..........\n..........\n..........")
 
 [sub_resource type="Resource" id="Resource_yi1xg"]
 script = ExtResource("13_6mr3n")
-waves = PackedStringArray()
+waves = PackedStringArray("..........\n..c..c....\n..........\n..m...m...\n....m.....\n..........\n..........\n..........")
 
 [sub_resource type="Resource" id="Resource_mrayk"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_toet1"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_4fatu"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_tlyk6"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_s17j2"]
+script = ExtResource("13_6mr3n")
+waves = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_dj70b"]
 script = ExtResource("13_6mr3n")
 waves = PackedStringArray()
 
@@ -237,8 +336,7 @@ size_normal = 10.0
 size_sprint = 11.5
 
 [node name="Camera3D" type="Camera3D" parent="CameraRig" unique_id=1994432496]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 30)
-projection = 1
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4.7683716e-07, 9.876433)
 size = 10.0
 
 [node name="Player" type="CharacterBody3D" parent="." unique_id=66199162]
@@ -266,6 +364,7 @@ fist_box_r_path = NodePath("../Rig/HandR/FistBox")
 durations = Array[float]([0.3, 0.3, 0.75])
 hit_windows = Array[Vector2]([Vector2(0.05, 0.95), Vector2(0.05, 0.95), Vector2(0.45, 0.8)])
 chain_open = 0.5
+whirl_reach = 0.8
 
 [node name="Rig" type="Node3D" parent="Player" unique_id=2111491753]
 script = ExtResource("5_1ra8h")
@@ -281,6 +380,7 @@ hang_run_lift = 0.2
 attack_reach = 1.5
 slam_reach = 2.0
 spin_rate = 32.0
+whirl_rate = 10.0
 impact_hold = 0.05
 impact_recoil = 0.0
 
@@ -373,30 +473,55 @@ Vector2i(0, 0): SubResource("Resource_aykaq"),
 Vector2i(0, 1): SubResource("Resource_tn7my"),
 Vector2i(0, 2): SubResource("Resource_sjtd8"),
 Vector2i(0, 3): SubResource("Resource_mxioc"),
+Vector2i(0, 4): SubResource("Resource_3ukw0"),
+Vector2i(1, -2): SubResource("Resource_kslcm"),
 Vector2i(1, -1): SubResource("Resource_6mr3n"),
-Vector2i(1, 0): SubResource("Resource_jhej5"),
-Vector2i(1, 1): SubResource("Resource_2q2ox"),
+Vector2i(1, 0): SubResource("Resource_2q2ox"),
+Vector2i(1, 1): SubResource("Resource_jhej5"),
 Vector2i(1, 2): SubResource("Resource_inaek"),
 Vector2i(1, 3): SubResource("Resource_babem"),
+Vector2i(1, 4): SubResource("Resource_k4orh"),
+Vector2i(2, -2): SubResource("Resource_py2qv"),
 Vector2i(2, -1): SubResource("Resource_km5kn"),
 Vector2i(2, 0): SubResource("Resource_smvt8"),
 Vector2i(2, 1): SubResource("Resource_gf3r8"),
 Vector2i(2, 2): SubResource("Resource_fbwgl"),
 Vector2i(2, 3): SubResource("Resource_7wi2t"),
+Vector2i(2, 4): SubResource("Resource_m3nkq"),
+Vector2i(3, -2): SubResource("Resource_kde0i"),
 Vector2i(3, -1): SubResource("Resource_kxf2b"),
 Vector2i(3, 0): SubResource("Resource_3v7c6"),
 Vector2i(3, 1): SubResource("Resource_hxfd1"),
 Vector2i(3, 2): SubResource("Resource_yi1xg"),
-Vector2i(3, 3): SubResource("Resource_mrayk")
+Vector2i(3, 3): SubResource("Resource_mrayk"),
+Vector2i(4, -1): SubResource("Resource_toet1"),
+Vector2i(4, 0): SubResource("Resource_4fatu"),
+Vector2i(4, 1): SubResource("Resource_tlyk6"),
+Vector2i(4, 2): SubResource("Resource_s17j2"),
+Vector2i(4, 3): SubResource("Resource_dj70b")
 })
 layout_doors = Dictionary[Vector4i, int]({
 Vector4i(-1, 0, -1, 1): 1,
 Vector4i(-1, 0, 0, 0): 1,
 Vector4i(-1, 1, 0, 1): 1,
 Vector4i(0, 0, 0, 1): 3,
-Vector4i(0, 1, 0, 2): 1
+Vector4i(0, 1, 0, 2): 1,
+Vector4i(0, 1, 1, 1): 2,
+Vector4i(1, 0, 1, 1): 1,
+Vector4i(1, 0, 2, 0): 1,
+Vector4i(1, 2, 1, 3): 1,
+Vector4i(1, 2, 2, 2): 1,
+Vector4i(2, -2, 2, -1): 1,
+Vector4i(2, -1, 2, 0): 2,
+Vector4i(2, 0, 2, 1): 1,
+Vector4i(2, 0, 3, 0): 4,
+Vector4i(2, 1, 2, 2): 1,
+Vector4i(2, 2, 3, 2): 1,
+Vector4i(3, 0, 3, 1): 1,
+Vector4i(3, 1, 3, 2): 1
 })
 start_cell = Vector2i(0, 2)
+back_wall_height = 8.0
 charger_scene = ExtResource("21_mrayk")
 shooter_scene = ExtResource("22_kxf2b")
 bomber_scene = ExtResource("23_yfs0k")

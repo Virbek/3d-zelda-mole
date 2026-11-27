@@ -90,16 +90,29 @@ extends Node
 @export var spin_tick: float = 0.25          ## délai entre deux dégâts sur le même ennemi
 @export var spin_shake: float = 0.2
 
+@export_group("Toupie bousier")
+## Réaction du bousier : la taupe l'attrape à deux mains et tourne sur
+## elle-même en le tenant devant elle (vitesse : whirl_rate du rig). Il frappe les ennemis qu'il balaie et meurt à la fin.
+@export var whirl_duration: float = 1.3
+@export var whirl_reach: float = 0.55        ## distance du bousier au-delà des mains
+@export var whirl_hit_radius: float = 1.3    ## autour du bousier : ennemis touchés
+@export var whirl_damage: int = 3
+@export var whirl_tick: float = 0.3          ## délai entre deux dégâts sur le même ennemi
+@export var whirl_shake: float = 0.3
+
 @export_group("Slam (abeille)")
 ## Attraper l'abeille étourdie, la lever au-dessus de la tête, la fracasser
-## au sol : elle éclate en dards qui partent en étoile autour du joueur.
+## au sol. Si elle retombe sur un autre ennemi, il est écrasé : gros dégâts.
+## Pendant l'armé, le joueur peut tourner pour viser.
 @export var slam_grab_time: float = 0.14     ## l'abeille rejoint les mains
 @export var slam_duration: float = 0.62      ## armé + abattement + retour (anim coup 3 du rig)
 @export var slam_damage: int = 4             ## sur l'abeille fracassée
-@export var slam_needle_count: int = 5
-@export var slam_needle_damage: int = 2
-@export var slam_needle_height: float = 0.6  ## hauteur de vol des dards
 @export var slam_shake: float = 0.6
+@export var slam_aim_turn_speed: float = 9.0 ## vitesse de rotation pour viser (rad/s)
+@export var slam_crush_radius: float = 1.8   ## autour du point d'impact : un ennemi là-dedans est écrasé
+@export var slam_crush_damage: int = 8       ## sur l'ennemi écrasé
+@export var slam_crush_bee_bonus: int = 2    ## dégâts en plus sur l'abeille quand elle écrase quelqu'un
+@export var slam_crush_shake: float = 0.9
 
 @export_group("Esquive")
 ## Un clic fait pendant l'esquive est gardé ce temps-là, puis rejoué à la sortie.
@@ -158,6 +171,9 @@ var _zip_target: Node3D = null
 var _zip_t: float = 0.0
 
 var _spin_t: float = 0.0
+var _spin_len: float = 0.9          ## durée de la toupie en cours
+var _whirl_target: Node3D = null    ## bousier tenu pendant la toupie, ou null
+var _whirl_ground_y: float = 0.0    ## hauteur de son origine posé au sol, avant la saisie
 var _spin_hits: Dictionary = {}   ## ennemi → temps du dernier dégât
 
 var _dodge_buffer_t: float = 0.0
@@ -231,6 +247,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_start_finisher(target)
 		elif reaction == "slam" and target.has_method("begin_grab"):
 			_start_slam(target)
+		elif reaction == "whirl" and target.has_method("begin_grab"):
+			_start_whirl(target)
 		else:
 			_start_spin()
 		return
@@ -678,6 +696,7 @@ func _find_stunned_nearby():
 func _start_spin() -> void:
 	is_spinning = true
 	_spin_t = 0.0
+	_spin_len = spin_duration
 	_spin_hits.clear()
 	_step = 0
 	_t = 0.0
@@ -690,11 +709,13 @@ func _start_spin() -> void:
 
 func _process_spin(delta: float) -> void:
 	_spin_t += delta
-	rig.set_spin_progress(_spin_t / maxf(spin_duration, 0.01))
+	rig.set_spin_progress(_spin_t / maxf(_spin_len, 0.01))
 
 	_spin_hits_check()
+	if _whirl_target != null:
+		_process_whirl()
 
-	if _spin_t >= spin_duration:
+	if _spin_t >= _spin_len:
 		cancel_spin()
 
 
@@ -707,6 +728,88 @@ func cancel_spin() -> void:
 	_set_fists(false, false)
 	rig.end_spin()
 	_grace = chain_grace
+	_finish_whirl()
+
+
+# ---------------------------------------------------------------- TOUPIE BOUSIER
+
+## La toupie, plus lente, mains jointes : le bousier est tenu devant elle.
+func _start_whirl(target: Node) -> void:
+	if target == null or not is_instance_valid(target) or not target.begin_grab():
+		return
+	_start_spin()
+	rig.play_spin(true)
+	_spin_len = whirl_duration
+	_whirl_target = target as Node3D
+	_whirl_ground_y = _whirl_target.global_position.y - player.global_position.y
+	Sfx.play_ui("swing", -4.0)
+
+
+func _whirl_hands() -> Vector3:
+	return (rig.hand_l.global_position + rig.hand_r.global_position) * 0.5
+
+
+## Direction horizontale joueur → mains (les bras tendus de la toupie).
+func _whirl_out() -> Vector3:
+	var out: Vector3 = _whirl_hands() - player.global_position
+	out.y = 0.0
+	return out.normalized() if out.length() > 0.01 else -player.global_transform.basis.z
+
+
+## Le bousier est collé aux mains. Appelé aussi depuis _process : le Rig
+## place les mains APRÈS Combat dans la frame physique, le bousier aurait
+## sinon une image de retard (visible à cette vitesse de rotation).
+func _place_whirl_target() -> Vector3:
+	var out: Vector3 = _whirl_out()
+	var pos: Vector3 = _whirl_hands() + out * whirl_reach
+	_whirl_target.global_position = pos
+	_whirl_target.rotation.y = atan2(-out.x, -out.z)   # tête vers l'extérieur
+	return pos
+
+
+func _process_whirl() -> void:
+	if not is_instance_valid(_whirl_target):
+		_whirl_target = null
+		return
+	var out: Vector3 = _whirl_out()
+	var pos: Vector3 = _place_whirl_target()
+
+	for e in get_tree().get_nodes_in_group("enemy"):
+		if e == _whirl_target or not is_instance_valid(e) or not (e is Node3D) or not e.has_method("take_hit"):
+			continue
+		var v: Vector3 = (e as Node3D).global_position - pos
+		v.y = 0.0
+		if v.length() > whirl_hit_radius:
+			continue
+		var last: float = _spin_hits.get(e, -999.0)
+		if _spin_t - last < whirl_tick:
+			continue
+		_spin_hits[e] = _spin_t
+		var dir: Vector3 = (e as Node3D).global_position - player.global_position
+		dir.y = 0.0
+		e.take_hit(dir.normalized() if dir.length() > 0.01 else out, whirl_damage, true)
+		_play_hit_sound("hit_heavy", pos, 2.0)
+		_sparks.burst(pos, dir)
+		_shake(whirl_shake)
+
+
+## Fin de la toupie (normale ou esquive) : le bousier est lâché et meurt.
+func _finish_whirl() -> void:
+	if _whirl_target == null:
+		return
+	var t: Node3D = _whirl_target
+	_whirl_target = null
+	if not is_instance_valid(t):
+		return
+	var out: Vector3 = _whirl_out()
+	var ground: Vector3 = t.global_position
+	ground.y = player.global_position.y + _whirl_ground_y
+	t.global_position = ground
+	t.end_grab()
+	t.take_hit(out, 999, true)   # tué sur le coup, projeté dans le sens du lancer
+	_sparks.burst(ground, Vector3.UP, true)
+	_play_hit_sound("hit_heavy", ground, 4.0)
+	_shake(slam_shake)
 
 
 ## Contrairement au combo, un même ennemi peut être touché plusieurs fois :
@@ -793,6 +896,10 @@ func _process_slam(delta: float) -> void:
 	var t: float = (_slam_t - slam_grab_time) / maxf(slam_duration, 0.01)
 	rig.set_attack_progress(minf(t, 1.0))
 
+	# Visée : jusqu'à l'impact, le joueur tourne pour choisir où l'abeille tombe
+	if not _slam_impacted:
+		_slam_steer(delta)
+
 	if not _slam_impacted:
 		if held:
 			_slam_target.global_position = hands
@@ -803,38 +910,80 @@ func _process_slam(delta: float) -> void:
 		_end_slam()
 
 
-## L'impact : l'abeille est écrasée au sol et les dards partent en étoile.
+## Le joueur oriente le slam avec le déplacement (dans le repère caméra).
+func _slam_steer(delta: float) -> void:
+	if not player.controls_enabled:
+		return
+	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	if input.length() < 0.2:
+		return
+	var dir := Vector3(input.x, 0.0, input.y).rotated(Vector3.UP, player.camera_yaw())
+	var want: float = atan2(-dir.x, -dir.z)
+	player.rotation.y = rotate_toward(player.rotation.y, want, slam_aim_turn_speed * delta)
+
+
+## L'ennemi le plus proche du point d'impact (hors abeille tenue), ou null.
+func _find_crush_victim(ground: Vector3) -> Node3D:
+	var best: Node3D = null
+	var best_d: float = slam_crush_radius
+	for e in get_tree().get_nodes_in_group("enemy"):
+		if e == _slam_target or not is_instance_valid(e) or not (e is Node3D) or not e.has_method("take_hit"):
+			continue
+		var v: Vector3 = (e as Node3D).global_position - ground
+		v.y = 0.0
+		var d: float = v.length()
+		if d <= best_d:
+			best_d = d
+			best = e as Node3D
+	return best
+
+
+func _shatter_breakables(at: Vector3, radius: float) -> void:
+	for b in get_tree().get_nodes_in_group("breakable"):
+		if not is_instance_valid(b) or not b.has_method("shatter") or not (b is Node3D):
+			continue
+		if b.has_method("is_present") and not b.is_present():
+			continue
+		var c: Vector3 = b.visual_center() if b.has_method("visual_center") else (b as Node3D).global_position
+		var v: Vector3 = c - at
+		v.y = 0.0
+		if v.length() <= radius:
+			b.shatter()
+
+
+## L'impact : l'abeille est écrasée au sol, et sur l'ennemi visé s'il y en a un.
 func _slam_impact(hands: Vector3) -> void:
 	_slam_impacted = true
 	var ground: Vector3 = Vector3(hands.x, player.global_position.y, hands.z)
-	var ignore: Array[Node] = []
+	var victim: Node3D = _find_crush_victim(ground)
+	if victim != null:
+		# L'abeille retombe pile sur lui : le rayon sert d'aimant
+		ground = Vector3(victim.global_position.x, player.global_position.y, victim.global_position.z)
+
+	var fwd: Vector3 = ground - player.global_position
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length() > 0.01 else -player.global_transform.basis.z
 
 	if _slam_target != null and is_instance_valid(_slam_target):
-		ignore.append(_slam_target)
 		_slam_target.global_position = ground
-		var dir: Vector3 = ground - player.global_position
-		dir.y = 0.0
 		_slam_target.end_grab()
-		_slam_target.take_hit(dir.normalized() if dir.length() > 0.01 else -player.global_transform.basis.z,
-			slam_damage, true)   # attaque réaction
+		var bee_dmg: int = slam_damage + (slam_crush_bee_bonus if victim != null else 0)
+		_slam_target.take_hit(fwd, bee_dmg, true)   # attaque réaction
 		_sparks.burst(ground, Vector3.UP, true)
 
-	# Étoile régulière, la première pointe dans le regard du joueur
-	var fwd: Vector3 = -player.global_transform.basis.z
-	fwd.y = 0.0
-	fwd = fwd.normalized()
-	var origin: Vector3 = player.global_position
-	origin.y += slam_needle_height
-	var count: int = maxi(slam_needle_count, 1)
-	for i in count:
-		var d: Vector3 = fwd.rotated(Vector3.UP, TAU * float(i) / float(count))
-		SlamNeedle.spawn(get_tree().current_scene, origin + d * 0.5, d, slam_needle_damage, ignore)
+	# Les boulets de sable sous l'impact éclatent (celui du bousier écrasé,
+	# souvent devant lui, hors du rayon mesuré depuis son centre)
+	_shatter_breakables(ground, slam_crush_radius + 0.6)
+
+	if victim != null and is_instance_valid(victim):
+		victim.take_hit(fwd, slam_crush_damage, true)
+		_sparks.burst(victim.global_position + Vector3.UP * 0.5, Vector3.UP, true)
+		_play_hit_sound("hit_heavy", ground, 6.0)
 
 	_play_hit_sound("hit_heavy", ground, 4.0)
 	Sfx.play("slam", ground, 2.0)
-	Sfx.play("hornet_shoot", ground)
 	_hit_stop(true)
-	_shake(slam_shake)
+	_shake(slam_crush_shake if victim != null else slam_shake)
 
 
 func _end_slam() -> void:
@@ -931,6 +1080,8 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
+	if _whirl_target != null and is_instance_valid(_whirl_target):
+		_place_whirl_target()
 	if _prompt == null:
 		return
 	var target = _reaction_target()

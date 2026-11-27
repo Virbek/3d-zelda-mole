@@ -11,6 +11,9 @@ extends Node3D
 ## Multiplie toutes les tailles ci-dessus (normal, sprint, combat, ciblage) :
 ## 1 = tel quel, plus grand = caméra plus éloignée.
 @export var zoom_scale: float = 1.2
+## Caméra en perspective : distance au joueur en taille normale. Le sprint,
+## le combat et le ciblage la font reculer en proportion de leurs tailles.
+@export var perspective_distance: float = 8.0
 
 @export_group("Secousse")
 @export var shake_decay: float = 4.0
@@ -61,12 +64,21 @@ var _threat_w: float = 0.0
 var _shake: float = 0.0
 var _shake_time: float = 0.0
 
+## En perspective, size ne fait rien : le zoom recule la caméra.
+## perspective_distance correspond à size_normal ; les autres tailles en sont
+## des multiples (sprint = 11.5 / 10 → 15 % plus loin).
+var _zoom: float = 1.0
+
 var lock_on: Node = null
 
 
 func _ready() -> void:
 	# Pas de dézoom visible au lancement : on part directement à la bonne taille
-	cam.size = size_normal * zoom_scale
+	_zoom = 1.0
+	if _is_ortho():
+		cam.size = size_normal * zoom_scale
+	else:
+		cam.position.z = perspective_distance
 
 
 func _physics_process(delta: float) -> void:
@@ -101,10 +113,12 @@ func _physics_process(delta: float) -> void:
 	wanted *= zoom_scale
 
 	# --- Zoom ---
-	
-	
 	var zt := 1.0 - exp(-zoom_smoothing * delta)
-	cam.size = lerp(cam.size, wanted, zt)
+	if _is_ortho():
+		cam.size = lerpf(cam.size, wanted, zt)
+	else:
+		_zoom = lerpf(_zoom, wanted / maxf(size_normal * zoom_scale, 0.01), zt)
+		cam.position.z = perspective_distance * _zoom
 
 	# --- Secousse ---
 	if _shake > 0.0:
@@ -151,6 +165,10 @@ func _clamp_to_bounds(p: Vector3) -> Vector3:
 	return p
 
 
+func _is_ortho() -> bool:
+	return cam.projection == Camera3D.PROJECTION_ORTHOGONAL
+
+
 func shake(strength: float) -> void:
 	_shake = maxf(_shake, strength)
 
@@ -187,9 +205,8 @@ func _update_threat(delta: float) -> void:
 ## excluant ce qui vient d'être touché, pour attraper plusieurs objets alignés
 ## (deux piliers l'un derrière l'autre, par exemple).
 ##
-## La caméra est orthographique : la ligne de vue d'un point est parallèle à
-## l'axe de la caméra, elle ne part pas de la position de la caméra. Un rayon
-## tiré depuis la caméra raterait les murs devant un ennemi excentré.
+## En orthographique, la ligne de vue d'un point est parallèle à l'axe de la
+## caméra ; en perspective, elle part de la caméra elle-même.
 func _update_occlusion(delta: float) -> void:
 	if not occlusion_enabled or target == null:
 		return
@@ -210,9 +227,10 @@ func _update_occlusion(delta: float) -> void:
 				points.append(c + side)
 
 	var blocking: Dictionary = {}
+	var ortho: bool = _is_ortho()
 	var back: Vector3 = cam.global_transform.basis.z * 60.0   # vers la caméra
 	for p in points:
-		_collect_blocking(p + back, p, blocking)
+		_collect_blocking(p + back if ortho else cam.global_position, p, blocking)
 
 	var t: float = 1.0 - exp(-occlusion_fade_speed * delta)
 	var done: Array = []

@@ -25,6 +25,8 @@ var has_boss_key: bool = false
 ## Coffres déjà vidés (hors petites clés) : « scène|x,y » → true. Sans ça,
 ## un rechargement au checkpoint refermerait le coffre et redonnerait l'objet.
 var _opened_chests: Dictionary = {}
+## Événements de la partie déjà vécus (revanche du boss gagnée...) : id → true.
+var _flags: Dictionary = {}
 
 
 func _ready() -> void:
@@ -76,6 +78,22 @@ func is_chest_opened(chest_id: String) -> bool:
 
 func mark_chest_opened(chest_id: String) -> void:
 	_opened_chests[chest_id] = true
+
+
+## Le joueur possède-t-il l'objet clé `id` (le prisme, par exemple) ?
+func has_key_item(id: StringName) -> bool:
+	for it in key_items:
+		if it != null and it.id == id:
+			return true
+	return false
+
+
+func has_flag(flag: String) -> bool:
+	return _flags.has(flag)
+
+
+func set_flag(flag: String) -> void:
+	_flags[flag] = true
 
 
 func _place(slots: Array[ItemData], item: ItemData) -> void:

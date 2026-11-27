@@ -88,12 +88,21 @@ func _physics_process(delta: float) -> void:
 	global_position = to
 	_travelled += step
 
-	for e in get_tree().get_nodes_in_group("enemy"):
+	var targets: Array[Node] = get_tree().get_nodes_in_group("enemy")
+	# Objets cassables (boulet de sable du bousier...) : touchés aussi
+	targets.append_array(get_tree().get_nodes_in_group(&"breakable"))
+	for e in targets:
 		if not is_instance_valid(e) or e in _hit or not e.has_method("take_hit"):
 			continue
-		var v: Vector3 = (e as Node3D).global_position - global_position
+		var reach: float = hit_radius
+		if e.has_method("is_present"):
+			if not e.is_present():
+				continue
+			# Gros objet : touché dès que le dard frôle sa surface
+			reach = hit_radius * 0.5 + float(e.visual_radius())
+		var v: Vector3 = (e.visual_center() if e.has_method("visual_center") else (e as Node3D).global_position) - global_position
 		v.y = 0.0
-		if v.length() > hit_radius:
+		if v.length() > reach:
 			continue
 		_hit.append(e)
 		e.take_hit(_dir, damage)

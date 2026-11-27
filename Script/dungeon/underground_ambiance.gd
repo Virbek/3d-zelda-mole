@@ -17,6 +17,10 @@ class_name UndergroundAmbiance
 @export_group("Lumière des fissures")
 @export var crack_light := Color(1.0, 0.78, 0.55)
 @export var crack_energy: float = 0.45
+## Ombres de la lumière des fissures. Coupées par défaut : sa direction
+## fixe projetait des ombres sans rapport avec les lampes des salles. Les
+## ombres viennent des lampes elles-mêmes.
+@export var crack_shadows: bool = false
 
 @export_group("Poussière")
 @export var dust_color := Color("#3a2a1c")
@@ -55,4 +59,4 @@ func apply_to(env: Environment, sun: DirectionalLight3D) -> void:
 	if sun != null:
 		sun.light_color = crack_light
 		sun.light_energy = crack_energy
-		sun.shadow_enabled = true
+		sun.shadow_enabled = crack_shadows

@@ -46,6 +46,8 @@ signal died
 @export var muzzle_offset: float = 0.75 ## distance de spawn devant lui (pointe du dard recourbé)
 @export var muzzle_height: float = 0.75
 @export var lead_factor: float = 0.25  ## anticipation du déplacement du joueur
+@export var max_lead: float = 1.5      ## anticipation max (m)
+@export var max_lead_angle: float = 25.0  ## écart max (degrés) entre le tir et la ligne directe
 @export var projectile_speed: float = 6.5  ## écrase la vitesse du projectile
 ## Layers du décor qui bloquent la ligne de vue (murs, poteaux).
 @export_flags_3d_physics var sight_mask: int = 1
@@ -79,7 +81,8 @@ signal died
 @export var stun_drain_delay: float = 0.6   ## temps sans coup avant que la jauge commence à redescendre
 @export var stun_drain_rate: float = 0.8    ## coups perdus par seconde, une fois la latence passée
 ## Ce que déclenche la commande réaction une fois étourdi. "slam" : le joueur
-## l'attrape, la fracasse au sol et elle éclate en dards autour de lui.
+## l'attrape et la fracasse au sol ; s'il la fait retomber sur un autre
+## ennemi, celui-ci est écrasé (gros dégâts).
 ## ("spin" reste disponible si on veut revenir à la toupie.)
 @export var reaction: String = "slam"
 
@@ -394,15 +397,28 @@ func _dir_to_player() -> Vector3:
 
 ## Vise légèrement devant le joueur s'il se déplace : un tir toujours
 ## parfaitement centré est trop facile à esquiver par simple strafe.
+##
+## Pendant une esquive, la vitesse du joueur est énorme et brève : s'en servir
+## envoyait le tir loin à côté, dans une direction absurde. On l'ignore alors,
+## et l'anticipation est bornée en distance et en angle.
 func _aim_direction() -> Vector3:
-	var predicted: Vector3 = _aim_point()
-	predicted += Vector3(player.velocity.x, 0.0, player.velocity.z) * lead_factor
+	var direct: Vector3 = _dir_to_player()
+	var lead := Vector3.ZERO
+	if not bool(player.get("is_dodging")):
+		lead = Vector3(player.velocity.x, 0.0, player.velocity.z) * lead_factor
+		lead = lead.limit_length(max_lead)
 
-	var v: Vector3 = predicted - (global_position + Vector3.UP * muzzle_height)
+	var v: Vector3 = _aim_point() + lead - global_position
 	v.y = 0.0
 	if v.length() < 0.01:
-		return -global_transform.basis.z
-	return v.normalized()
+		return direct
+	var dir: Vector3 = v.normalized()
+
+	var ang: float = direct.signed_angle_to(dir, Vector3.UP)
+	var lim: float = deg_to_rad(max_lead_angle)
+	if absf(ang) > lim:
+		dir = direct.rotated(Vector3.UP, signf(ang) * lim)
+	return dir
 
 
 ## Vrai si aucun élément de décor ne sépare la bouche du canon du torse.

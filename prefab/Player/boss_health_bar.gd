@@ -113,11 +113,13 @@ func _draw() -> void:
 		draw_rect(Rect2(x, y, w * _ratio, bar_height),
 			Color(fill_color, fill_color.a * a))
 
-	# Marques de tiers : le joueur anticipe le changement de phase
-	for i in 2:
-		var tx: float = x + w * (float(i + 1) / 3.0)
-		draw_line(Vector2(tx, y), Vector2(tx, y + bar_height),
-			Color(tick_color, tick_color.a * a), 2.0)
+	# Marque du seuil de phase 2 : le joueur anticipe le changement
+	var threshold: float = 0.5
+	if _boss != null and is_instance_valid(_boss) and "phase2_threshold" in _boss:
+		threshold = float(_boss.get("phase2_threshold"))
+	var tx: float = x + w * threshold
+	draw_line(Vector2(tx, y), Vector2(tx, y + bar_height),
+		Color(tick_color, tick_color.a * a), 2.0)
 
 	# Contour
 	draw_rect(Rect2(x - 3.0, y - 3.0, w + 6.0, bar_height + 6.0),

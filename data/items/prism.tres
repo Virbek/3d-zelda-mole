@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="ItemData" format=3]
+
+[ext_resource type="Script" path="res://Script/items/item_data.gd" id="1_mlo8d"]
+
+[resource]
+script = ExtResource("1_mlo8d")
+id = &"prism"
+category = 3
+display_name = "Prisme"
+description = "Un bloc de verre taillé, resté intact sous le sable. La lumière qui le traverse se sépare en couleurs."
+color = Color(0.85, 0.95, 1, 1)

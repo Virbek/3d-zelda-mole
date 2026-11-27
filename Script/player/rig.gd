@@ -30,6 +30,13 @@ extends Node3D
 @export var hand_stuck_time: float = 0.8     ## délai avant rappel de la main
 @export_flags_3d_physics var clip_mask: int = 1   ## calque du décor
 
+@export_group("Sécurité")
+## Filet de sécurité : si le buste reste décroché de la capsule (ou devient
+## invalide), le rig se recale tout seul et l'écrit dans la sortie.
+@export var watchdog_enabled: bool = true
+@export var watchdog_distance: float = 3.5   ## écart horizontal buste ↔ capsule jugé anormal
+@export var watchdog_time: float = 0.75      ## durée d'écart tolérée (une propulsion dure moins)
+
 @export_group("Pieds")
 @export var stance_width: float = 0.30      ## écartement latéral des pieds
 @export var step_threshold: float = 0.50    ## distance avant de déclencher un pas
@@ -157,6 +164,10 @@ extends Node3D
 @export var spin_rate: float = 16.0        ## rad/s
 @export var spin_height: float = 0.75
 @export var spin_body_tilt: float = 8.0    ## léger penché, en degrés
+## Toupie à deux mains (bousier tenu devant soi) : plus lente, mains jointes
+@export var whirl_rate: float = 18.0       ## rad/s
+@export var whirl_hand_radius: float = 0.75 ## distance des mains à l'axe du joueur
+@export var whirl_hand_gap: float = 0.2    ## demi-écart entre les deux mains
 @export_group("Poing chargé")
 ## Ces trois durées doivent correspondre à celles de Combat.gd, qui pilote
 ## la progression : si elles divergent, le poing et sa hitbox se désynchronisent.
@@ -214,6 +225,7 @@ var _hang_run_k: float = 0.0     ## 0 en marche → 1 en plein sprint (lissé)
 
 var _body_pos := Vector3.ZERO
 var _body_vel := Vector3.ZERO
+var _watch_t: float = 0.0
 
 var _was_dodging := false
 
@@ -223,6 +235,7 @@ var _ragdoll_vel: Dictionary = {}   ## Node3D → vitesse de chute courante
 var _spinning: bool = false
 var _spin_k: float = 0.0
 var _spin_angle_t: float = 0.0
+var _spin_two_hands: bool = false
 
 ## Poids courant de l'attraction par la main : 0 = pieds seuls, 1 = main seule.
 ## Lissé pour éviter les à-coups au début et à la fin d'un coup.
@@ -382,6 +395,46 @@ func _physics_process(delta: float) -> void:
 	_update_gauntlets(delta)
 	_update_boots(delta)
 	_update_tether_bow(delta)
+	if watchdog_enabled:
+		_watchdog(delta)
+
+
+## Bug rapporté : après un dard pris en pleine attaque, seuls les pieds
+## suivaient, le buste et les mains restaient figés (vie > 0). Cause non
+## reproduite. Ce garde-fou détecte l'état (position invalide, ou buste
+## resté loin de la capsule trop longtemps), recale le haut du corps et
+## décrit l'état du rig dans la sortie pour retrouver la cause.
+func _watchdog(delta: float) -> void:
+	var invalid: bool = not _body_pos.is_finite() or not _body_vel.is_finite() \
+		or not body.global_transform.origin.is_finite()
+	for h in _hands:
+		if not h.pos.is_finite() or not h.vel.is_finite():
+			invalid = true
+	var off: float = Vector2(_body_pos.x - player.global_position.x, _body_pos.z - player.global_position.z).length()
+	if invalid or off > watchdog_distance:
+		_watch_t += delta
+	else:
+		_watch_t = 0.0
+	if not invalid and _watch_t < watchdog_time:
+		return
+
+	push_warning("Rig : haut du corps décroché (%s), recalé. atk_kind=%d atk_t=%.2f lead_w=%.2f punching=%s charging=%s spinning=%s presenting=%s écart=%.2f m time_scale=%.2f" % [
+		"position invalide" if invalid else "trop loin",
+		_atk_kind, _atk_t, _lead_w, _punching, _charging, _spinning, _presenting, off, Engine.time_scale])
+	_watch_t = 0.0
+	_snap_upper_body()
+
+
+## Remet buste et mains à leur place de repos, vitesses à zéro.
+func _snap_upper_body() -> void:
+	var yaw := Basis(Vector3.UP, player.rotation.y)
+	_body_pos = player.global_position + Vector3.UP * body_height
+	_body_vel = Vector3.ZERO
+	body.global_transform = Transform3D(yaw, _body_pos)
+	for h in _hands:
+		h.pos = _body_pos + yaw * Vector3(hand_offset.x * h.side, hand_offset.y, hand_offset.z)
+		h.vel = Vector3.ZERO
+		h.node.global_position = h.pos
 
 
 ## Appelé par Player.gd à la mort. Chaque membre arrête d'être piloté par le
@@ -1237,6 +1290,10 @@ func _step_duration() -> float:
 ## Les pieds marchent normalement même pendant le poing chargé : le joueur
 ## reste au sol, seul son bras part. C'est la différence avec l'ancien dash.
 func _update_feet(delta: float) -> void:
+	if _spinning and _spin_two_hands:
+		_spin_feet()
+		return
+
 	# Au démarrage de l'esquive, les deux pieds décollent ensemble : ça fait un bond
 	if player.is_dodging and not _was_dodging:
 		for f in _feet:
@@ -1291,6 +1348,19 @@ func _update_feet(delta: float) -> void:
 			_body_vel += dir.normalized() * push_impulse
 
 
+## Toupie à deux mains : les pieds pivotent avec le corps autour du joueur,
+## en petits pas alternés (un pied décolle pendant que l'autre fait pivot).
+func _spin_feet() -> void:
+	var right: Vector3 = Basis(Vector3.UP, _spin_angle_t).x
+	for f in _feet:
+		var p: Vector3 = player.global_position + right * f.side * stance_width
+		p.y = f.planted.y   # hauteur du sol au début de la toupie
+		f.stepping = false
+		f.planted = p
+		var phase: float = _spin_angle_t * 2.0 + (0.0 if f.side > 0.0 else PI)
+		f.node.global_position = p + Vector3.UP * maxf(sin(phase), 0.0) * step_height * 0.6
+
+
 # ---------------------------------------------------------------- CORPS
 
 func _update_body(delta: float) -> void:
@@ -1319,6 +1389,12 @@ func _update_body(delta: float) -> void:
 	_body_vel += to_target * stiffness * delta
 	_body_vel *= exp(-damping * delta)
 	_body_pos += _body_vel * delta
+
+	# Toupie à deux mains : le corps est l'axe de rotation, il reste collé au
+	# joueur (sans ressort) pour que le bousier tourne à distance constante.
+	if _spinning and _spin_two_hands:
+		_body_pos = player.global_position + Vector3.UP * body_height
+		_body_vel = player.velocity
 
 	if clip_enabled:
 		var anchor: Vector3 = player.global_position + Vector3.UP * body_height
@@ -1648,8 +1724,10 @@ func hit_impact(side: float) -> void:
 	if _punching:
 		_punch_hit = true
 
-func play_spin() -> void:
+## two_hands : les deux mains jointes devant le torse (bousier tenu), plus lent.
+func play_spin(two_hands: bool = false) -> void:
 	_spinning = true
+	_spin_two_hands = two_hands
 	_spin_k = 0.0
 	_spin_angle_t = 0.0
 
@@ -1669,7 +1747,7 @@ func end_spin() -> void:
 ## apparaissent et disparaissent d'un coup.
 func _spin_hand_position(side: float, delta: float) -> Vector3:
 	if side > 0.0:
-		_spin_angle_t += spin_rate * delta   # incrémenté une seule fois
+		_spin_angle_t += (whirl_rate if _spin_two_hands else spin_rate) * delta   # incrémenté une seule fois
 
 	# Ouverture/fermeture sur les 15 premiers et derniers pourcents
 	var open: float = clampf(_spin_k / 0.15, 0.0, 1.0)
@@ -1679,8 +1757,24 @@ func _spin_hand_position(side: float, delta: float) -> Vector3:
 	var rest_r: float = Vector2(hand_offset.x, hand_offset.z).length()
 	var r: float = lerpf(rest_r, spin_radius, minf(open, close))
 
-	var a: float = _spin_angle_t + (0.0 if side > 0.0 else PI)
 	var center: Vector3 = _body_pos + Vector3.UP * (spin_height - body_height)
+
+	if _spin_two_hands:
+		# Centré sur le joueur lui-même, pas sur le corps à ressort
+		center = player.global_position + Vector3.UP * spin_height
+		# Repère du torse tel qu'il tourne. Body est top_level : sa rotation
+		# est en repère monde (body.rotation.y = _spin_angle_t), sans le cap
+		# du joueur. Y ajouter ce cap décalait les mains dès qu'on tournait.
+		var b := Basis(Vector3.UP, _spin_angle_t)
+		var fwd: Vector3 = -b.z
+		fwd.y = 0.0
+		fwd = fwd.normalized()
+		var right: Vector3 = Vector3.UP.cross(-fwd).normalized()
+		# Ouverture rapide : à pleine allonge presque tout de suite
+		var reach: float = lerpf(rest_r, whirl_hand_radius, minf(clampf(_spin_k / 0.06, 0.0, 1.0), close))
+		return center + fwd * reach + right * side * whirl_hand_gap
+
+	var a: float = _spin_angle_t + (0.0 if side > 0.0 else PI)
 
 	return center + Vector3(cos(a), 0.0, sin(a)) * r
 

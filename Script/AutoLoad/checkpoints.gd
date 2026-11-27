@@ -12,6 +12,11 @@ extends Node
 var position: Vector3 = Vector3.ZERO
 var has_checkpoint: bool = false
 
+## Progression de chaque donjon, conservée d'une mort à l'autre (la scène est
+## rechargée, cet autoload non). Clé = scène + chemin du donjon ; valeur
+## remplie et relue par Dungeon (salles nettoyées, clés, portes ouvertes...).
+var dungeon_progress: Dictionary = {}
+
 var _overlay: ColorRect
 
 
