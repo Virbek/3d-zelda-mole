@@ -25,6 +25,9 @@ signal died
 @export var damage_per_hit: int = 1
 
 @export_group("Détection")
+## Vrai : attaque le joueur dès son apparition et ne lâche jamais (tous les
+## ennemis d'une salle se battent). Faux : portées detect_range / lose_range.
+@export var always_aggro: bool = true
 @export var detect_range: float = 10.0
 @export var lose_range: float = 14.0       ## plus grande que detect_range : hystérésis
 @export var lose_time: float = 4.0
@@ -235,7 +238,7 @@ func _set_state(next: State) -> void:
 func _idle() -> void:
 	velocity.x = 0.0
 	velocity.z = 0.0
-	if _distance_to_player() < detect_range:
+	if always_aggro or _distance_to_player() < detect_range:
 		_lose_t = 0.0
 		_set_state(State.CHASE)
 
@@ -243,7 +246,7 @@ func _idle() -> void:
 func _chase(delta: float) -> void:
 	var d: float = _distance_to_player()
 
-	if d > lose_range:
+	if not always_aggro and d > lose_range:
 		_lose_t += delta
 		if _lose_t >= lose_time:
 			_set_state(State.IDLE)

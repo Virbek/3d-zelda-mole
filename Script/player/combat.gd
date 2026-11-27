@@ -93,7 +93,8 @@ extends Node
 @export_group("Toupie bousier")
 ## Réaction du bousier : la taupe l'attrape à deux mains et tourne sur
 ## elle-même en le tenant devant elle (vitesse : whirl_rate du rig). Il frappe les ennemis qu'il balaie et meurt à la fin.
-@export var whirl_duration: float = 1.3
+@export var whirl_grab_time: float = 0.3     ## saisie visible avant la toupie (bras tendus, puis ramenés)
+@export var whirl_duration: float = 1.2      ## toupie : lente au départ, de plus en plus rapide
 @export var whirl_reach: float = 0.55        ## distance du bousier au-delà des mains
 @export var whirl_hit_radius: float = 1.3    ## autour du bousier : ennemis touchés
 @export var whirl_damage: int = 3
@@ -174,6 +175,10 @@ var _spin_t: float = 0.0
 var _spin_len: float = 0.9          ## durée de la toupie en cours
 var _whirl_target: Node3D = null    ## bousier tenu pendant la toupie, ou null
 var _whirl_ground_y: float = 0.0    ## hauteur de son origine posé au sol, avant la saisie
+var _whirl_grabbing: bool = false   ## phase de saisie en cours (avant la rotation)
+var _whirl_throw: bool = false      ## fin de la toupie : lancer (boss) au lieu de tuer
+var _whirl_from := Vector3.ZERO     ## position du bousier au moment où la taupe va le chercher
+var _spin_offset: float = 0.0       ## temps de la toupie passé avant la rotation (saisie)
 var _spin_hits: Dictionary = {}   ## ennemi → temps du dernier dégât
 
 var _dodge_buffer_t: float = 0.0
@@ -207,7 +212,8 @@ var is_zipping: bool:
 ## pilote le corps (coup lourd ou propulsion du poing chargé).
 var is_movement_locked: bool:
 	get:
-		return is_finishing or is_zipping or is_slamming
+		# Saisie du bousier : immobile, sinon les bras visent un point qui bouge
+		return is_finishing or is_zipping or is_slamming or _whirl_grabbing
 
 
 func _ready() -> void:
@@ -249,6 +255,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_start_slam(target)
 		elif reaction == "whirl" and target.has_method("begin_grab"):
 			_start_whirl(target)
+		elif reaction == "boss_throw" and target.has_method("throw_away"):
+			_start_whirl(target, true)
 		else:
 			_start_spin()
 		return
@@ -688,7 +696,9 @@ func _find_stunned_nearby():
 			continue
 		var v: Vector3 = e.global_position - player.global_position
 		v.y = 0.0
-		if v.length() <= spin_trigger_range:
+		# Un gros ennemi (le boss) se saisit de plus loin
+		var reach: float = float(e.get("reaction_range")) if "reaction_range" in e else spin_trigger_range
+		if v.length() <= reach:
 			return e
 	return null
 
@@ -697,6 +707,7 @@ func _start_spin() -> void:
 	is_spinning = true
 	_spin_t = 0.0
 	_spin_len = spin_duration
+	_spin_offset = 0.0
 	_spin_hits.clear()
 	_step = 0
 	_t = 0.0
@@ -709,7 +720,10 @@ func _start_spin() -> void:
 
 func _process_spin(delta: float) -> void:
 	_spin_t += delta
-	rig.set_spin_progress(_spin_t / maxf(_spin_len, 0.01))
+	if _whirl_grabbing:
+		_process_whirl_grab()
+		return
+	rig.set_spin_progress((_spin_t - _spin_offset) / maxf(_spin_len - _spin_offset, 0.01))
 
 	_spin_hits_check()
 	if _whirl_target != null:
@@ -728,21 +742,65 @@ func cancel_spin() -> void:
 	_set_fists(false, false)
 	rig.end_spin()
 	_grace = chain_grace
+	if _whirl_grabbing:
+		# Interrompu pendant la saisie (esquive) : le bousier est simplement lâché
+		_whirl_grabbing = false
+		rig.end_grab_pose()
+		if _whirl_target != null and is_instance_valid(_whirl_target):
+			_whirl_target.end_grab()
+		_whirl_target = null
+		return
 	_finish_whirl()
 
 
 # ---------------------------------------------------------------- TOUPIE BOUSIER
 
 ## La toupie, plus lente, mains jointes : le bousier est tenu devant elle.
-func _start_whirl(target: Node) -> void:
+## throw : à la fin, la cible est lancée (throw_away) au lieu d'être achevée.
+func _start_whirl(target: Node, throw: bool = false) -> void:
 	if target == null or not is_instance_valid(target) or not target.begin_grab():
 		return
-	_start_spin()
-	rig.play_spin(true)
-	_spin_len = whirl_duration
+	_whirl_throw = throw
+	is_spinning = true
+	_spin_t = 0.0
+	_spin_hits.clear()
+	_step = 0
+	_t = 0.0
+	_grace = 0.0
+	_buffered = false
+	_press_t = -1.0
+	_set_fists(false, false)   # pas de coups pendant la saisie
+	player.velocity.x = 0.0
+	player.velocity.z = 0.0
+
 	_whirl_target = target as Node3D
+	_whirl_from = _whirl_target.global_position
 	_whirl_ground_y = _whirl_target.global_position.y - player.global_position.y
-	Sfx.play_ui("swing", -4.0)
+	_whirl_grabbing = true
+	_spin_offset = whirl_grab_time
+	_spin_len = whirl_grab_time + whirl_duration
+
+	# Face au bousier : les bras partent droit vers lui
+	var to_t: Vector3 = _whirl_from - player.global_position
+	to_t.y = 0.0
+	if to_t.length() > 0.01:
+		player.rotation.y = atan2(-to_t.x, -to_t.z)
+	rig.play_grab(_whirl_target)
+
+
+## Saisie : bras tendus vers le bousier, puis ramenés contre le torse avec
+## lui. À la fin, la toupie démarre (lentement) depuis cette pose.
+func _process_whirl_grab() -> void:
+	var k: float = _spin_t / maxf(whirl_grab_time, 0.01)
+	rig.set_grab_progress(k)
+	if _whirl_target != null and is_instance_valid(_whirl_target):
+		_place_whirl_target()
+	if k >= 1.0:
+		_whirl_grabbing = false
+		rig.end_grab_pose()
+		rig.play_spin(true)
+		_set_fists(true, true)
+		Sfx.play_ui("swing", -4.0)
 
 
 func _whirl_hands() -> Vector3:
@@ -761,7 +819,23 @@ func _whirl_out() -> Vector3:
 ## sinon une image de retard (visible à cette vitesse de rotation).
 func _place_whirl_target() -> Vector3:
 	var out: Vector3 = _whirl_out()
-	var pos: Vector3 = _whirl_hands() + out * whirl_reach
+	# Le boss se tient à bout de bras, plus loin, et reste au niveau du sol
+	var reach: float = float(_whirl_target.get("whirl_reach")) if "whirl_reach" in _whirl_target else whirl_reach
+	var keep_h: bool = "whirl_keep_height" in _whirl_target and bool(_whirl_target.get("whirl_keep_height"))
+	var pos: Vector3 = _whirl_hands() + out * reach
+	if keep_h:
+		pos.y = player.global_position.y + _whirl_ground_y + 0.3
+	if _whirl_grabbing:
+		# Aller : il reste où il est ; retour : il suit les mains jusqu'au torse
+		var k: float = _spin_t / maxf(whirl_grab_time, 0.01)
+		var split: float = clampf(float(rig.get("grab_reach_part")), 0.05, 0.95)
+		if k < split:
+			return _whirl_target.global_position
+		var e: float = smoothstep(0.0, 1.0, (k - split) / (1.0 - split) * 2.5)
+		var held: Vector3 = _whirl_hands() + out * reach * (1.0 if keep_h else 0.6)
+		if keep_h:
+			held.y = pos.y
+		pos = _whirl_from.lerp(held, e)
 	_whirl_target.global_position = pos
 	_whirl_target.rotation.y = atan2(-out.x, -out.z)   # tête vers l'extérieur
 	return pos
@@ -802,6 +876,13 @@ func _finish_whirl() -> void:
 	if not is_instance_valid(t):
 		return
 	var out: Vector3 = _whirl_out()
+	if _whirl_throw and t.has_method("throw_away"):
+		# Coup final : lâché à pleine vitesse, il part dans le mur
+		_whirl_throw = false
+		t.throw_away()
+		_play_hit_sound("hit_heavy", t.global_position, 6.0)
+		_shake(1.0)
+		return
 	var ground: Vector3 = t.global_position
 	ground.y = player.global_position.y + _whirl_ground_y
 	t.global_position = ground

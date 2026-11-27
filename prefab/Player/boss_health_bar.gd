@@ -43,6 +43,9 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	# Boss vaincu mais resté couché au sol : il quitte le groupe, la barre s'efface
+	if _boss != null and is_instance_valid(_boss) and not _boss.is_in_group(boss_group):
+		_boss = null
 	if _boss == null or not is_instance_valid(_boss):
 		_find_boss()
 

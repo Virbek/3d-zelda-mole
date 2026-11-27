@@ -27,9 +27,11 @@ extends CharacterBody3D
 ##
 ## Il n'utilise pas le jeton d'attaque : il est seul dans son arène.
 
-enum State { IDLE, WINDUP, AIRBORNE, LANDED, REST, HURT, DEAD, TRANSITION, HOP }
+enum State { IDLE, WINDUP, AIRBORNE, LANDED, REST, HURT, DEAD, TRANSITION, HOP, FINISH, GRABBED, THROWN }
 
 signal died
+## Lancé par la taupe (fin de la revanche), il vient de percuter le mur.
+signal crashed
 signal health_changed(current: int, maximum: int)
 signal phase_changed(phase: int)
 
@@ -41,6 +43,9 @@ signal phase_changed(phase: int)
 @export var damage_per_hit: int = 1
 
 @export_group("Détection")
+## Vrai : attaque le joueur dès son apparition et ne lâche jamais (tous les
+## ennemis d'une salle se battent). Faux : portées detect_range / lose_range.
+@export var always_aggro: bool = true
 @export var detect_range: float = 16.0
 
 @export_group("Saut")
@@ -100,6 +105,25 @@ signal phase_changed(phase: int)
 @export_group("Revanche")
 ## Mis par la salle quand le boss revient après le prisme.
 @export var rematch: bool = false
+## Carcasse : le boss déjà vaincu, couché au sol, inerte (posé par la salle
+## quand on y revient). Ni ennemi ni barre de vie.
+@export var spawn_dead: bool = false
+@export var topple_time: float = 0.7        ## durée de la chute en arrière à sa première mort
+var _lie_offset_y: float = 0.0
+
+@export_group("Fin de la revanche")
+## À 0 PV pendant la revanche, il ne meurt pas : il reste sonné, et la
+## commande réaction lance le coup final (la taupe le fait tourner et le
+## jette dans le mur de la salle, qui cède).
+@export var finish_color := Color(0.25, 1.0, 0.35)
+@export var reaction_range: float = 4.5    ## distance d'où le joueur peut l'attraper
+@export var whirl_reach: float = 1.9       ## tenu par le bras, à bout de main
+@export var throw_time: float = 0.45       ## vol jusqu'au mur
+@export var throw_beyond: float = 4.0      ## continue après le mur, puis disparaît
+## Point du mur visé par le lancer (monde). Posé par la salle.
+var throw_target := Vector3.INF
+var whirl_keep_height: bool = true         ## tenu à hauteur du sol, pas des mains
+var _saved_layers := Vector3i.ZERO
 @export var line_enabled: bool = true
 @export var line_speed: float = 12.0        ## m/s : un peu plus vite que le sprint
 @export var line_width: float = 1.0
@@ -204,6 +228,16 @@ func _ready() -> void:
 		_phase = 1
 		_rage_k = 1.0
 
+	if spawn_dead:
+		remove_from_group("enemy")
+		remove_from_group("boss")
+		state = State.DEAD
+		hurt_box.monitorable = false
+		set_collision_layer_value(1, false)
+		set_physics_process(false)
+		_set_lying(1.0)
+		return
+
 	health_changed.emit(health, max_health)
 	phase_changed.emit(_phase)
 
@@ -236,7 +270,7 @@ func _physics_process(delta: float) -> void:
 			_transition(delta)
 		State.HOP:
 			_hop(delta)
-		State.DEAD:
+		State.DEAD, State.FINISH, State.GRABBED, State.THROWN:
 			return
 
 
@@ -248,7 +282,12 @@ func _process(delta: float) -> void:
 	_model.set_rage(_rage_k, rage_color)
 	var pose: String = "rest"
 	var k: float = 0.0
+	if state == State.FINISH:
+		# Sonné : vert vif qui pulse, bras ballants
+		_mat.albedo_color = finish_color.lerp(_base_color, 0.25 + 0.25 * sin(_t * 8.0))
 	match state:
+		State.FINISH, State.GRABBED, State.THROWN:
+			pose = "dead"
 		State.WINDUP:
 			pose = "windup"
 			k = _t / maxf(windup_time, 0.01)
@@ -302,7 +341,7 @@ func _set_state(next: State) -> void:
 # ---------------------------------------------------------------- ÉTATS
 
 func _idle() -> void:
-	if _distance_to_player() < detect_range:
+	if always_aggro or _distance_to_player() < detect_range:
 		_jumps_left = jumps_base + _phase
 		_start_jump()
 
@@ -547,11 +586,17 @@ func take_hit(direction: Vector3, damage: int = damage_per_hit, _breaks_stun: bo
 	if state == State.DEAD or state == State.AIRBORNE or state == State.TRANSITION:
 		return
 
+	if state == State.FINISH or state == State.GRABBED or state == State.THROWN:
+		return
+
 	health = maxi(health - damage, 0)
 	health_changed.emit(health, max_health)
 
 	if health <= 0:
-		_die()
+		if rematch:
+			_enter_finish()
+		else:
+			_die()
 		return
 
 	# Recul visible : plus marqué pour un coup lourd
@@ -795,7 +840,84 @@ func stun(_duration: float) -> void:
 
 
 func is_stunned() -> bool:
-	return false
+	return state == State.FINISH
+
+
+func get_reaction() -> String:
+	return "boss_throw"
+
+
+## Revanche à 0 PV : il s'effondre à genoux, sonné, en attendant le coup final.
+func _enter_finish() -> void:
+	_rocks_on = false
+	if _zone != null and is_instance_valid(_zone):
+		_zone.queue_free()
+		_zone = null
+	if _hit_react != null:
+		_hit_react.stop()
+	velocity = Vector3.ZERO
+	global_position.y = _ground_y
+	_set_mesh_scale(_base_scale)
+	_set_state(State.FINISH)
+	Sfx.play("stun", global_position, 4.0)
+	_shake(0.8)
+	if _flash_tween != null and _flash_tween.is_running():
+		_flash_tween.kill()
+	_mat.albedo_color = finish_color
+
+
+## La taupe l'attrape par le bras : plus de collisions, Combat le transporte.
+func begin_grab() -> bool:
+	if state != State.FINISH:
+		return false
+	_saved_layers = Vector3i(collision_layer, collision_mask, hurt_box.collision_layer)
+	collision_layer = 0
+	collision_mask = 0
+	hurt_box.collision_layer = 0
+	_set_state(State.GRABBED)
+	return true
+
+
+## Lâché sans être lancé (esquive pendant la saisie) : de nouveau sonné.
+func end_grab() -> void:
+	if state != State.GRABBED:
+		return
+	collision_layer = _saved_layers.x
+	collision_mask = _saved_layers.y
+	hurt_box.collision_layer = _saved_layers.z
+	global_position.y = _ground_y
+	_set_state(State.FINISH)
+
+
+## Lancé par la taupe : il vole vers throw_target en tournoyant, percute le
+## mur (crashed), le traverse et disparaît dans le noir.
+func throw_away() -> void:
+	if state != State.GRABBED:
+		return
+	_set_state(State.THROWN)
+	var from: Vector3 = global_position
+	var to: Vector3 = throw_target if throw_target.is_finite() else from + Vector3.RIGHT * 8.0
+	var dir: Vector3 = to - from
+	dir.y = 0.0
+	dir = dir.normalized() if dir.length() > 0.01 else Vector3.RIGHT
+	var peak: Vector3 = from.lerp(to, 0.5) + Vector3.UP * 1.5
+	var t := create_tween()
+	t.tween_property(self, "global_position", peak, throw_time * 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	t.tween_property(self, "global_position", to, throw_time * 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	t.parallel().tween_property(mesh, "rotation:z", -TAU * 1.25, throw_time).as_relative()
+	t.tween_callback(func() -> void:
+		Sfx.play("boss_death" if Sfx.sounds.has("boss_death") else "enemy_death", global_position, 4.0)
+		crashed.emit()
+	)
+	t.tween_property(self, "global_position", to + dir * throw_beyond + Vector3.DOWN * 1.0, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	t.parallel().tween_property(mesh, "scale", mesh.scale * 0.5, 0.35)
+	t.tween_callback(func() -> void:
+		_set_state(State.DEAD)
+		remove_from_group("enemy")
+		remove_from_group("boss")
+		died.emit()
+		queue_free()
+	)
 
 
 ## Vrai pendant que l'ennemi prépare ou porte une attaque. Lu par le HUD
@@ -845,5 +967,61 @@ func _die() -> void:
 	d.tween_property(_mat, "albedo_color:a", 0.0, death_time * 0.5)
 
 	_shake(1.2)
+
+	# Première mort : il bascule en arrière et reste couché au sol. Seule la
+	# revanche le fait disparaître pour de bon.
+	if not rematch:
+		d.kill()
+		_mat.albedo_color = _base_color
+		_lie_down()
+		return
+
 	await d.finished
 	queue_free()
+
+
+## Chute en arrière, rebond sur le dos, poussière : puis plus rien ne bouge.
+func _lie_down() -> void:
+	# Repart de la hauteur actuelle du mesh (l'écrasement du coup l'a décalé)
+	_lie_offset_y = mesh.position.y - _mesh_rest_y
+	# Plus un ennemi : la barre de vie se cache, la caméra et les attaques
+	# du joueur l'ignorent
+	remove_from_group("enemy")
+	remove_from_group("boss")
+	var t := create_tween()
+	for i in 4:
+		t.tween_property(_mat, "albedo_color", flash_color, 0.07)
+		t.tween_property(_mat, "albedo_color", _base_color, 0.07)
+	t.tween_method(_set_lying, 0.0, 1.0, topple_time).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	t.tween_callback(_on_hit_ground)
+	t.tween_method(_set_lying, 1.0, 0.93, 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	t.tween_method(_set_lying, 0.93, 1.0, 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+
+
+func _on_hit_ground() -> void:
+	Sfx.play("boss_land", global_position, 2.0)
+	_shake(1.0)
+	var fx: GDScript = load("res://Script/fx/spawn_fx.gd") as GDScript
+	var parent := get_parent() as Node3D
+	if fx != null and parent != null:
+		var back: Vector3 = global_transform.basis.z.normalized()
+		var lp: Vector3 = parent.to_local(global_position + back * _lying_length() * 0.6)
+		lp.y = parent.to_local(Vector3(0.0, _ground_y, 0.0)).y
+		fx.call("sand_burst", parent, lp, 1.8, 18, 1.2)
+		fx.call("dust_ring", parent, lp, 4.0)
+
+
+## Hauteur du modèle (base → sommet), dans le repère du boss.
+func _lying_length() -> float:
+	return -_mesh_local_bottom * mesh.scale.y * 2.0
+
+
+## k = 0 debout, 1 couché sur le dos. Le mesh pivote autour de sa base
+## (+X : le haut part vers l'arrière, +Z) au lieu de son centre.
+func _set_lying(k: float) -> void:
+	var a: float = deg_to_rad(88.0) * k
+	var half: float = -_mesh_local_bottom * mesh.scale.y
+	var base := Vector3(0.0, _mesh_rest_y + _lie_offset_y * (1.0 - k) - half, 0.0)
+	var thick: float = half * 0.45   # épaisseur du dos : il repose dessus, pas dans le sol
+	mesh.rotation.x = a
+	mesh.position = base + Vector3(0.0, half * cos(a) + thick * sin(a), half * sin(a))

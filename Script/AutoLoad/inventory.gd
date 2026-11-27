@@ -96,6 +96,47 @@ func set_flag(flag: String) -> void:
 	_flags[flag] = true
 
 
+## Inventaire vide (nouvelle partie).
+func reset() -> void:
+	combat_items.clear()
+	combat_items.resize(COMBAT_SLOTS)
+	exploration_items.clear()
+	exploration_items.resize(EXPLORATION_SLOTS)
+	key_items.clear()
+	energy_fragments = 0
+	has_boss_key = false
+	_opened_chests.clear()
+	_flags.clear()
+	changed.emit()
+
+
+## Copie de l'état, prise par Checkpoints à chaque sauvegarde.
+func snapshot() -> Dictionary:
+	return {
+		"combat": combat_items.duplicate(),
+		"exploration": exploration_items.duplicate(),
+		"key_items": key_items.duplicate(),
+		"fragments": energy_fragments,
+		"boss_key": has_boss_key,
+		"chests": _opened_chests.duplicate(true),
+		"flags": _flags.duplicate(true),
+	}
+
+
+## Revient à un état pris par snapshot() (mort après la dernière sauvegarde).
+func restore(s: Dictionary) -> void:
+	if s.is_empty():
+		return
+	combat_items.assign(s["combat"])
+	exploration_items.assign(s["exploration"])
+	key_items.assign(s["key_items"])
+	energy_fragments = int(s["fragments"])
+	has_boss_key = bool(s["boss_key"])
+	_opened_chests = (s["chests"] as Dictionary).duplicate(true)
+	_flags = (s["flags"] as Dictionary).duplicate(true)
+	changed.emit()
+
+
 func _place(slots: Array[ItemData], item: ItemData) -> void:
 	for i in slots.size():
 		if slots[i] == null:

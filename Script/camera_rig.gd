@@ -81,7 +81,16 @@ func _ready() -> void:
 		cam.position.z = perspective_distance
 
 
+## Vrai pendant une cinématique : la caméra ne suit plus le joueur, c'est
+## la cinématique qui place le rig (position, rotation) et la distance de la
+## caméra. La secousse continue de marcher.
+var cinematic: bool = false
+
+
 func _physics_process(delta: float) -> void:
+	if cinematic:
+		_update_shake(delta)
+		return
 	if target == null:
 		return
 
@@ -120,7 +129,10 @@ func _physics_process(delta: float) -> void:
 		_zoom = lerpf(_zoom, wanted / maxf(size_normal * zoom_scale, 0.01), zt)
 		cam.position.z = perspective_distance * _zoom
 
-	# --- Secousse ---
+	_update_shake(delta)
+
+
+func _update_shake(delta: float) -> void:
 	if _shake > 0.0:
 		_shake = maxf(_shake - shake_decay * delta * _shake, 0.0)
 		_shake_time += delta * shake_speed

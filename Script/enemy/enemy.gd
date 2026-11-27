@@ -28,9 +28,12 @@ signal died
 @export var damage_per_hit: int = 1
 
 @export_group("Détection")
+## Vrai : attaque le joueur dès son apparition et ne lâche jamais (tous les
+## ennemis d'une salle se battent). Faux : portées detect_range / lose_range.
+@export var always_aggro: bool = true
 @export var detect_range: float = 9.0      ## distance d'éveil
 @export var lose_range: float = 13.0       ## distance d'abandon (plus grande : hystérésis)
-@export var charge_range: float = 6.5      ## distance à laquelle il déclenche sa charge
+@export var charge_range: float = 14.0     ## distance à laquelle il déclenche sa charge (de loin)
 @export var lose_time: float = 4.0         ## délai avant abandon hors de portée
 
 @export_group("Déplacement")
@@ -41,12 +44,11 @@ signal died
 @export_group("Charge")
 @export var telegraph_time: float = 0.6   ## temps d'arrêt avant de foncer
 @export var charge_speed: float = 13.0
-## Doit dépasser charge_range d'une bonne marge : sinon reculer tout droit
-## pendant le télégraphe suffit à sortir du couloir avant que la charge ne
-## parte. La marge doit couvrir la distance qu'un joueur peut parcourir en
-## reculant pendant telegraph_time.
-@export var charge_distance: float = 10.0
-@export var charge_max_time: float = 1.2   ## sécurité anti-blocage
+@export var charge_distance: float = 18.0   ## longueur max d'une charge
+## La charge va jusqu'au joueur plus cette marge (le temps qu'il recule
+## pendant l'annonce), sans dépasser charge_distance ni le premier mur.
+@export var charge_overshoot: float = 4.0
+@export var charge_max_time: float = 1.8   ## sécurité anti-blocage
 @export var recover_time: float = 0.6      ## fenêtre de punition pour le joueur
 @export var charge_damage: int = 1
 @export var charge_cooldown: float = 0.7
@@ -75,7 +77,7 @@ signal died
 @export var flee_max_time: float = 2.5        ## au-delà (coincé contre un mur), il s'arrête quand même
 
 @export_group("Encerclement")
-@export var circle_distance: float = 4.5
+@export var circle_distance: float = 8.0   ## il tourne à distance, en cherchant un angle de charge
 @export var circle_speed: float = 2.2
 @export var circle_dir: float = 1.0        ## 1 ou -1, tiré au sort au démarrage
 
@@ -230,7 +232,7 @@ func _set_state(next: State) -> void:
 func _idle(_delta: float) -> void:
 	velocity.x = 0.0
 	velocity.z = 0.0
-	if _distance_to_player() < detect_range:
+	if always_aggro or _distance_to_player() < detect_range:
 		_aggro = true
 		_lose_t = 0.0
 		_set_state(State.CHASE)
@@ -240,7 +242,7 @@ func _chase(delta: float) -> void:
 	var d: float = _distance_to_player()
 
 	# Il n'abandonne que si le joueur reste loin un certain temps
-	if d > lose_range:
+	if not always_aggro and d > lose_range:
 		_lose_t += delta
 		if _lose_t >= lose_time:
 			_aggro = false
@@ -281,6 +283,7 @@ func _chase(delta: float) -> void:
 		_circle(delta, d)
 		return
 
+	# Hors de portée de charge seulement : il se rapproche juste assez
 	var dir: Vector3 = _dir_to_player()
 	var spd: float = chase_speed * (no_ball_speed_mult if use_dung_beetle and not _has_ball else 1.0)
 	velocity.x = dir.x * spd
@@ -434,7 +437,8 @@ func _start_telegraph() -> void:
 ## pas.
 func _measure_charge_reach(from: Vector3, dir: Vector3) -> float:
 	var space := get_world_3d().direct_space_state
-	var to: Vector3 = from + dir * charge_distance
+	var length: float = minf(_distance_to_player() + charge_overshoot, charge_distance)
+	var to: Vector3 = from + dir * length
 	var q := PhysicsRayQueryParameters3D.create(from, to)
 	# Le joueur ne doit jamais agir comme un mur ici : la charge le traverse,
 	# seul un vrai obstacle (mur, pilier) doit couper la mesure.
@@ -443,7 +447,7 @@ func _measure_charge_reach(from: Vector3, dir: Vector3) -> float:
 
 	var hit := space.intersect_ray(q)
 	if hit.is_empty():
-		return charge_distance
+		return length
 	return from.distance_to(hit.position)
 
 

@@ -164,10 +164,35 @@ extends Node3D
 @export var spin_rate: float = 16.0        ## rad/s
 @export var spin_height: float = 0.75
 @export var spin_body_tilt: float = 8.0    ## léger penché, en degrés
-## Toupie à deux mains (bousier tenu devant soi) : plus lente, mains jointes
-@export var whirl_rate: float = 18.0       ## rad/s
-@export var whirl_hand_radius: float = 0.75 ## distance des mains à l'axe du joueur
+## Toupie à deux mains (bousier tenu) : même mouvement que la toupie
+## normale, mais les deux mains tournent ensemble au même endroit.
+@export var whirl_rate: float = 18.0       ## vitesse atteinte à la fin (rad/s)
+@export var whirl_start_speed: float = 0.35  ## vitesse de départ (fraction de whirl_rate)
+@export var whirl_accel_curve: float = 1.2   ## > 1 : démarre lentement, accélère de plus en plus
+@export var whirl_hand_radius: float = 0.85 ## rayon des mains autour du joueur
 @export var whirl_hand_gap: float = 0.2    ## demi-écart entre les deux mains
+## Les mains ne sont pas collées au corps : un ressort les attire vers l'avant
+## du torse. Elles prennent du retard quand il accélère, le rattrapent en
+## oscillant, et le dépassent un peu au lâcher.
+@export var whirl_follow_stiffness: float = 35.0  ## force d'attraction vers l'avant du torse
+@export var whirl_follow_damping: float = 3.5     ## plus bas = ça oscille davantage
+@export var whirl_follow_drag: float = 2.0        ## frein de l'air : retard qui grandit avec la vitesse
+## Poids du bousier : les poings tombent quand ça tourne lentement (début,
+## fin) et remontent avec la vitesse ; l'orbite penche comme un lancer de
+## marteau. La hauteur suit un ressort : les poings se laissent porter.
+@export var whirl_droop: float = 0.45      ## chute des poings à l'arrêt (m)
+@export var whirl_lean_back: float = 14.0  ## buste penché en arrière pendant la rotation (degrés)
+@export var whirl_lean_side: float = 8.0   ## buste penché du côté où il tourne (degrés)
+@export var whirl_tilt: float = 0.22       ## inclinaison de l'orbite (m de haut en bas)
+@export var whirl_y_stiffness: float = 35.0
+@export var whirl_y_damping: float = 5.0
+## Saisie du bousier, avant la toupie : les mains vont le chercher, puis le
+## ramènent contre le torse ; le corps plonge en avant puis se redresse.
+@export var grab_reach_part: float = 0.5   ## part de la saisie passée à tendre les bras
+@export var grab_crouch: float = 0.22      ## le corps plonge de tant (m)
+@export var grab_lean_forward: float = 22.0  ## penché en avant en tendant les bras (degrés)
+@export var grab_lean_back: float = 10.0   ## penché en arrière en le ramenant (degrés)
+@export var grab_arc_height: float = 0.3   ## arc des mains à l'aller (m)
 @export_group("Poing chargé")
 ## Ces trois durées doivent correspondre à celles de Combat.gd, qui pilote
 ## la progression : si elles divergent, le poing et sa hitbox se désynchronisent.
@@ -236,6 +261,15 @@ var _spinning: bool = false
 var _spin_k: float = 0.0
 var _spin_angle_t: float = 0.0
 var _spin_two_hands: bool = false
+var _grabbing: bool = false
+var _grab_k: float = 0.0
+var _grab_target: Node3D = null
+var _grab_from: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]   ## mains au début (gauche, droite)
+var _grab_seize: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]  ## mains au moment de la prise
+var _whirl_y: float = 0.0     ## décalage vertical des poings (ressort)
+var _whirl_ha: float = 0.0    ## angle des mains (rad), attiré par celui du corps
+var _whirl_hw: float = 0.0    ## vitesse angulaire des mains
+var _whirl_vy: float = 0.0
 
 ## Poids courant de l'attraction par la main : 0 = pieds seuls, 1 = main seule.
 ## Lissé pour éviter les à-coups au début et à la fin d'un coup.
@@ -423,6 +457,20 @@ func _watchdog(delta: float) -> void:
 		_atk_kind, _atk_t, _lead_w, _punching, _charging, _spinning, _presenting, off, Engine.time_scale])
 	_watch_t = 0.0
 	_snap_upper_body()
+
+
+## Le joueur vient d'être téléporté (checkpoint, cinématique) : pieds, buste,
+## mains et fils sont remis d'un coup autour de lui. Sans ça, ils restent à
+## l'ancienne position et rejoignent le corps en traversant la salle, fils
+## électriques étirés derrière eux.
+func snap_to_player() -> void:
+	for f in _feet:
+		f.stepping = false
+		f.t = 0.0
+		f.planted = _rest_target(f)
+		f.node.global_position = f.planted
+	_snap_upper_body()
+	_reset_tether_bows()
 
 
 ## Remet buste et mains à leur place de repos, vitesses à zéro.
@@ -801,6 +849,9 @@ func _clear_charge_glow() -> void:
 func _attach_tethers() -> void:
 	_tethers = EnergyTethers.new()
 	_tethers.name = "Tethers"
+	# Redessinés même jeu en pause : pendant un coffre, le corps et les
+	# poings bougent (tweens en pause) ; figés, les fils restaient en arrière
+	_tethers.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(_tethers)
 	for entry in _gauntlets:
 		var g: Node3D = entry[0]
@@ -1458,6 +1509,26 @@ func _update_body(delta: float) -> void:
 	if _spinning:
 		body.rotation.y = _spin_angle_t
 		body.rotation.x = deg_to_rad(spin_body_tilt) * _spin_k
+		if _spin_two_hands:
+			# Contrepoids : le buste part en arrière, à l'opposé du bousier,
+			# d'autant plus que ça tourne vite (+X = haut du corps vers l'arrière)
+			var lean_k: float = minf(_whirl_speed(), clampf((1.0 - _spin_k) / 0.1, 0.0, 1.0))
+			body.rotation.x = deg_to_rad(whirl_lean_back) * lean_k
+			# Et un peu sur le côté où il tourne : _spin_angle_t croît, le
+			# corps tourne vers sa gauche ; +Z = haut du corps vers la gauche
+			body.rotation.z = deg_to_rad(whirl_lean_side) * lean_k
+	elif _grabbing:
+		# Plonge en avant en tendant les bras, se redresse en arrière en
+		# ramenant la prise (+X = haut du corps vers l'arrière)
+		var split: float = clampf(grab_reach_part, 0.05, 0.95)
+		var grab_lean: float
+		if _grab_k < split:
+			grab_lean = -grab_lean_forward * sin(_grab_k / split * PI * 0.5)
+		else:
+			var k2: float = (_grab_k - split) / (1.0 - split)
+			grab_lean = lerpf(-grab_lean_forward, grab_lean_back, smoothstep(0.0, 1.0, k2))
+		body.rotation.x = deg_to_rad(grab_lean)
+		body.global_position += Vector3.DOWN * grab_crouch * sin(_grab_k * PI)
 
 
 # ---------------------------------------------------------------- MAINS
@@ -1506,6 +1577,12 @@ func _update_hands(delta: float) -> void:
 
 	for h in _hands:
 		var local := Vector3(hand_offset.x * h.side, hand_offset.y, hand_offset.z)
+		if _grabbing:
+			h.pos = _clip_world(body.global_position, _grab_hand_position(h.side), hand_clip_radius)
+			h.vel = Vector3.ZERO
+			h.node.global_position = h.pos
+			h.node.rotation = body.rotation
+			continue
 		if _spinning:
 			h.pos = _clip_world(body.global_position, _spin_hand_position(h.side, delta), hand_clip_radius)
 			h.vel = Vector3.ZERO
@@ -1684,6 +1761,121 @@ func present_item(item: Node3D) -> Tween:
 	return t
 
 
+# ---------------------------------------------------------------- POSES SCRIPTÉES
+
+## Le rig cesse de simuler : corps et mains sont placés par pose_* /
+## place_hands (coffre). Se termine par end_present(), comme present_item.
+func pose_begin() -> void:
+	_presenting = true
+	_clear_charge_glow()
+	_reset_tether_bows()
+	for entry in _gauntlets:
+		(entry[0] as Gauntlet).set_open(true)
+
+
+## Fils droits : l'arc d'un coup en cours ne doit pas rester figé pendant
+## une pose (le rig ne le met plus à jour).
+func _reset_tether_bows() -> void:
+	_bow_k = 0.0
+	for i in 2:
+		_bow_prev[i] = Vector3.ZERO
+		if _tethers != null:
+			_tethers.set_bow(i, Vector3.ZERO)
+
+
+## Oriente les gantelets : doigts (-Z) vers fingers, dos de la main (+Y) vers
+## up (paume à l'opposé). Ajouté au tween t sur time secondes.
+func _tween_gauntlets(t: Tween, fingers_l: Vector3, up_l: Vector3, fingers_r: Vector3, up_r: Vector3, time: float) -> void:
+	for entry in _gauntlets:
+		var g: Node3D = entry[0]
+		var right_side: bool = float(entry[1]) > 0.0
+		var f: Vector3 = (fingers_r if right_side else fingers_l).normalized()
+		var u: Vector3 = (up_r if right_side else up_l).normalized()
+		if f.length() < 0.01:
+			continue
+		if absf(f.dot(u)) > 0.97 or u.length() < 0.01:
+			u = Vector3.UP if absf(f.y) < 0.9 else -player.global_transform.basis.z
+		var b := Basis.looking_at(f, u)
+		var parent_rot: Basis = (g.get_parent() as Node3D).global_basis.orthonormalized()
+		t.tween_property(g, "quaternion", (parent_rot.inverse() * b).get_rotation_quaternion(), time)
+		entry[2] = f   # reprise douce au retour
+
+
+## Place les poings directement (suivi d'un objet animé, ex. couvercle).
+func place_hands(left: Vector3, right: Vector3) -> void:
+	hand_l.global_position = left
+	hand_r.global_position = right
+
+
+## Buste penché (degrés, + = en avant), abaissé de drop et avancé de forward.
+func pose_body(lean_forward_deg: float, drop: float, forward: float, time: float) -> Tween:
+	var fwd: Vector3 = -player.global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var pos: Vector3 = player.global_position + Vector3.UP * (body_height - drop) + fwd * forward
+	var t := create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).set_parallel(true)
+	t.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	t.tween_property(body, "global_position", pos, time)
+	# +X = haut du corps vers l'arrière : pencher en avant = rotation négative
+	t.tween_property(body, "rotation", Vector3(-deg_to_rad(lean_forward_deg), player.rotation.y, 0.0), time)
+	return t
+
+
+## Poings vers left / right, et buste dans la pose donnée, en time secondes.
+## look_at : point visé par les doigts (INF = orientation inchangée).
+## palm_down : paumes vers le sol (prise sur un dessus), sinon face à face.
+func pose_hands(left: Vector3, right: Vector3, time: float, lean_forward_deg: float = 0.0, drop: float = 0.0, forward: float = 0.0, look_at: Vector3 = Vector3.INF, palm_down: bool = false) -> Tween:
+	var t := pose_body(lean_forward_deg, drop, forward, time)
+	t.tween_property(hand_l, "global_position", left, time)
+	t.tween_property(hand_r, "global_position", right, time)
+	if look_at.is_finite():
+		var mid: Vector3 = (left + right) * 0.5
+		var out_l: Vector3 = Vector3.UP if palm_down else Vector3(left.x - mid.x, 0.0, left.z - mid.z)
+		var out_r: Vector3 = Vector3.UP if palm_down else Vector3(right.x - mid.x, 0.0, right.z - mid.z)
+		_tween_gauntlets(t, look_at - left, out_l, look_at - right, out_r, time)
+	return t
+
+
+## Comme present_item, mais l'objet sort de `from` (le fond du coffre) tenu
+## à deux mains : les poings remontent ensemble au-dessus de la tête et
+## l'objet flotte juste au-dessus d'eux.
+func present_item_two_hands(item: Node3D, from: Vector3) -> Tween:
+	_presenting = true
+	_reset_tether_bows()
+	var yaw := Basis(Vector3.UP, player.rotation.y)
+	var right: Vector3 = yaw * Vector3.RIGHT
+	var center: Vector3 = player.global_position + Vector3.UP * body_height
+	var top: Vector3 = center + Vector3.UP * present_fist_height
+	var item_pos: Vector3 = top + Vector3.UP * (present_item_height + 0.1)
+
+	_present_item = item
+	add_child(item)
+	item.top_level = true
+	item.global_position = from
+	item.scale = Vector3.ONE * present_item_scale * 0.6
+
+	var t := create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).set_parallel(true)
+	t.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.tween_property(hand_l, "global_position", top - right * 0.15, 0.4)
+	t.tween_property(hand_r, "global_position", top + right * 0.15, 0.4)
+	# Doigts tournés vers l'objet, paumes face à face sous lui
+	for entry in _gauntlets:
+		(entry[0] as Gauntlet).set_open(true)
+	_tween_gauntlets(t, item_pos - (top - right * 0.15), -right, item_pos - (top + right * 0.15), right, 0.4)
+	t.tween_property(body, "global_position", center + Vector3.UP * 0.06, 0.4)
+	t.tween_property(body, "rotation", Vector3(deg_to_rad(present_lean_degrees), player.rotation.y, 0.0), 0.4)
+	# L'objet monte avec les poings, un rien en retard, et grossit
+	t.tween_property(item, "global_position", item_pos, 0.45).set_delay(0.04)
+	t.tween_property(item, "scale", Vector3.ONE * present_item_scale, 0.45).set_delay(0.04)
+	var spin := item.create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).set_loops()
+	spin.tween_property(item, "rotation:y", TAU, 3.0).as_relative()
+	var bob := item.create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).set_loops()
+	bob.tween_interval(0.6)
+	bob.tween_property(item, "global_position:y", item_pos.y + 0.05, 0.8).set_trans(Tween.TRANS_SINE)
+	bob.tween_property(item, "global_position:y", item_pos.y, 0.8).set_trans(Tween.TRANS_SINE)
+	return t
+
+
 ## Fin de la présentation : l'objet disparaît, le corps se redresse puis le
 ## rig reprend la main. Les poings rejoignent leur place en arc.
 func end_present() -> Tween:
@@ -1696,8 +1888,8 @@ func end_present() -> Tween:
 		if _present_item != null and is_instance_valid(_present_item):
 			_present_item.queue_free()
 		_present_item = null
-		if _gauntlet_r != null:
-			_gauntlet_r.set_open(false)
+		for entry in _gauntlets:
+			(entry[0] as Gauntlet).set_open(false)
 		for h in _hands:
 			h.pos = h.node.global_position
 			h.vel = Vector3.ZERO
@@ -1728,12 +1920,86 @@ func hit_impact(side: float) -> void:
 func play_spin(two_hands: bool = false) -> void:
 	_spinning = true
 	_spin_two_hands = two_hands
+	_whirl_y = 0.0
+	_whirl_vy = 0.0
 	_spin_k = 0.0
 	_spin_angle_t = 0.0
+	if two_hands:
+		# Repart de l'orientation du corps : les mains sont devant lui à la
+		# fin de la saisie, la toupie enchaîne sans saut
+		_spin_angle_t = body.rotation.y
+		_whirl_ha = _spin_angle_t
+		_whirl_hw = 0.0
 
 
 func set_spin_progress(k: float) -> void:
 	_spin_k = clampf(k, 0.0, 1.0)
+
+
+## Vitesse de la toupie à deux mains (fraction de whirl_rate) : lente au
+## départ, de plus en plus rapide jusqu'au lâcher.
+func _whirl_speed() -> float:
+	return lerpf(whirl_start_speed, 1.0, pow(_spin_k, whirl_accel_curve))
+
+
+# ---------------------------------------------------------------- SAISIE
+
+## La taupe va chercher target à deux mains et le ramène contre elle.
+## Combat pilote la progression (set_grab_progress), puis lance la toupie.
+func play_grab(target: Node3D) -> void:
+	_grabbing = true
+	_grab_k = 0.0
+	_grab_target = target
+	for h in _hands:
+		var i: int = 1 if h.side > 0.0 else 0
+		_grab_from[i] = h.pos
+		_grab_seize[i] = h.pos
+
+
+func set_grab_progress(k: float) -> void:
+	_grab_k = clampf(k, 0.0, 1.0)
+
+
+func end_grab_pose() -> void:
+	_grabbing = false
+	_grab_target = null
+
+
+## Où la main side doit agripper la cible : de part et d'autre, côté joueur.
+func _grab_grip(side: float) -> Vector3:
+	var fwd: Vector3 = -player.global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var right: Vector3 = fwd.cross(Vector3.UP)
+	var p: Vector3 = player.global_position + fwd * 1.0 + Vector3.UP * (spin_height + 0.1)
+	if _grab_target != null and is_instance_valid(_grab_target):
+		p = _grab_target.global_position + Vector3.UP * 0.35 - fwd * 0.25
+	return p + right * side * (whirl_hand_gap + 0.18)
+
+
+## Contre le torse, devant : là où la toupie reprendra les mains.
+func _grab_hold(side: float) -> Vector3:
+	var fwd: Vector3 = -player.global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var right: Vector3 = fwd.cross(Vector3.UP)
+	var rest_r: float = Vector2(hand_offset.x, hand_offset.z).length()
+	return player.global_position + Vector3.UP * spin_height + fwd * rest_r + right * side * whirl_hand_gap
+
+
+func _grab_hand_position(side: float) -> Vector3:
+	var i: int = 1 if side > 0.0 else 0
+	var split: float = clampf(grab_reach_part, 0.05, 0.95)
+	if _grab_k < split:
+		# Aller : les bras se tendent vers la cible en arc, vite puis en douceur
+		var e: float = 1.0 - pow(1.0 - _grab_k / split, 3.0)
+		var p: Vector3 = _grab_from[i].lerp(_grab_grip(side), e)
+		p.y += sin(e * PI) * grab_arc_height
+		_grab_seize[i] = p
+		return p
+	# Retour : la prise est ramenée contre le torse
+	var k: float = (_grab_k - split) / (1.0 - split)
+	return _grab_seize[i].lerp(_grab_hold(side), smoothstep(0.0, 1.0, k))
 
 
 func end_spin() -> void:
@@ -1746,8 +2012,23 @@ func end_spin() -> void:
 ## s'ouvre au démarrage et se referme à la fin : sans ça, les bras
 ## apparaissent et disparaissent d'un coup.
 func _spin_hand_position(side: float, delta: float) -> Vector3:
-	if side > 0.0:
-		_spin_angle_t += (whirl_rate if _spin_two_hands else spin_rate) * delta   # incrémenté une seule fois
+	if side > 0.0:   # une seule fois par frame
+		_spin_angle_t += (whirl_rate * _whirl_speed() if _spin_two_hands else spin_rate) * delta
+		if _spin_two_hands:
+			# Mains attirées par l'avant du torse (ressort amorti sur l'écart
+			# de vitesse, plus un frein de l'air qui creuse le retard)
+			var w_body: float = whirl_rate * _whirl_speed()
+			var acc: float = (_spin_angle_t - _whirl_ha) * whirl_follow_stiffness \
+				+ (w_body - _whirl_hw) * whirl_follow_damping - _whirl_hw * whirl_follow_drag
+			_whirl_hw += acc * delta
+			_whirl_ha += _whirl_hw * delta
+			# Les poings remontent avec la vitesse (et redescendent au lâcher)
+			var speed_k: float = minf(_whirl_speed(), clampf((1.0 - _spin_k) / 0.1, 0.0, 1.0))
+			# Seule la chute passe par le ressort : l'inclinaison tourne trop
+			# vite pour lui (elle serait gommée), elle s'ajoute directement
+			var want_y: float = -whirl_droop * (1.0 - speed_k)
+			_whirl_vy += ((want_y - _whirl_y) * whirl_y_stiffness - _whirl_vy * whirl_y_damping) * delta
+			_whirl_y += _whirl_vy * delta
 
 	# Ouverture/fermeture sur les 15 premiers et derniers pourcents
 	var open: float = clampf(_spin_k / 0.15, 0.0, 1.0)
@@ -1762,17 +2043,17 @@ func _spin_hand_position(side: float, delta: float) -> Vector3:
 	if _spin_two_hands:
 		# Centré sur le joueur lui-même, pas sur le corps à ressort
 		center = player.global_position + Vector3.UP * spin_height
-		# Repère du torse tel qu'il tourne. Body est top_level : sa rotation
-		# est en repère monde (body.rotation.y = _spin_angle_t), sans le cap
-		# du joueur. Y ajouter ce cap décalait les mains dès qu'on tournait.
-		var b := Basis(Vector3.UP, _spin_angle_t)
-		var fwd: Vector3 = -b.z
-		fwd.y = 0.0
-		fwd = fwd.normalized()
-		var right: Vector3 = Vector3.UP.cross(-fwd).normalized()
-		# Ouverture rapide : à pleine allonge presque tout de suite
-		var reach: float = lerpf(rest_r, whirl_hand_radius, minf(clampf(_spin_k / 0.06, 0.0, 1.0), close))
-		return center + fwd * reach + right * side * whirl_hand_gap
+		# Même ouverture que la toupie normale, les deux mains ensemble, côte
+		# à côte, et DEVANT le torse : (cos, sin) tournait en sens inverse du
+		# corps (body.rotation.y = _spin_angle_t). L'avant du corps est -Z
+		# tourné de _spin_angle_t autour de +Y.
+		var a2: float = _whirl_ha   # angle des mains, pas celui du corps
+		var dir := Vector3(-sin(a2), 0.0, -cos(a2))
+		var perp: Vector3 = dir.cross(Vector3.UP)   # droite du corps : main droite à droite
+		var r2: float = lerpf(rest_r, whirl_hand_radius, minf(open, close))
+		var speed_k2: float = minf(_whirl_speed(), clampf((1.0 - _spin_k) / 0.1, 0.0, 1.0))
+		var y: float = _whirl_y + whirl_tilt * sin(_whirl_ha) * speed_k2
+		return center + dir * r2 + perp * side * whirl_hand_gap + Vector3.UP * y
 
 	var a: float = _spin_angle_t + (0.0 if side > 0.0 else PI)
 

@@ -42,6 +42,7 @@ var plate: Node3D = null
 var _plate_top: Node3D = null
 var _plate_lamp: MeshInstance3D = null
 var _plate_used: bool = false
+var _plate_area: Area3D = null
 
 var locked_color := Color(0.5, 0.3, 0.12)
 var lock_color := Color(1.0, 0.82, 0.2)
@@ -195,7 +196,7 @@ func _build_plate() -> void:
 	col.position.y = 0.5
 	area.add_child(col)
 	plate.add_child(area)
-	area.body_entered.connect(_on_plate_body_entered)
+	_plate_area = area
 
 
 ## Boîte alignée sur le monde (la dalle n'a pas d'orientation propre).
@@ -210,9 +211,19 @@ func _plain_box(parent: Node3D, size: Vector3, pos: Vector3, color: Color) -> Me
 	return m
 
 
-func _on_plate_body_entered(body: Node3D) -> void:
-	if _plate_used or not body.is_in_group("player"):
+## Sondée à chaque frame plutôt que sur body_entered : en combat, la dalle
+## ne réagit pas, et un joueur resté dessus jusqu'à la fin du combat doit
+## l'enclencher sans avoir à en sortir puis y revenir.
+func _physics_process(_delta: float) -> void:
+	if Engine.is_editor_hint() or _plate_used or _plate_area == null:
 		return
+	for body in _plate_area.get_overlapping_bodies():
+		if body.is_in_group("player") and not bool(body.get("in_combat")):
+			_press_plate()
+			return
+
+
+func _press_plate() -> void:
 	_plate_used = true
 	var t := create_tween().set_parallel(true)
 	t.tween_property(_plate_top, "position:y", -0.06, 0.12)\

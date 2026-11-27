@@ -17,6 +17,14 @@ var has_checkpoint: bool = false
 ## remplie et relue par Dungeon (salles nettoyées, clés, portes ouvertes...).
 var dungeon_progress: Dictionary = {}
 
+## Instantané pris à chaque activation d'un checkpoint : progression des
+## donjons et inventaire. Une mort (ou « Recommencer au checkpoint ») remet
+## tout dans cet état : ce qui a été fait depuis la dernière sauvegarde
+## (salles nettoyées, clés, portes, coffres...) est annulé.
+var _saved_progress: Dictionary = {}
+var _saved_inventory: Dictionary = {}
+var _has_save: bool = false
+
 var _overlay: ColorRect
 
 
@@ -36,9 +44,34 @@ func _build_overlay() -> void:
 	layer.add_child(_overlay)
 
 
+## Pose le point de réapparition et sauvegarde la situation actuelle.
 func set_checkpoint(pos: Vector3) -> void:
 	position = pos
 	has_checkpoint = true
+	_saved_progress = dungeon_progress.duplicate(true)
+	_saved_inventory = Inventory.snapshot()
+	_has_save = true
+
+
+## Nouvelle partie (menu principal) : plus de checkpoint, donjons et
+## inventaire remis à zéro.
+func new_game() -> void:
+	position = Vector3.ZERO
+	has_checkpoint = false
+	dungeon_progress = {}
+	_saved_progress = {}
+	_saved_inventory = {}
+	_has_save = false
+	Inventory.reset()
+	_overlay.color.a = 0.0
+
+
+## Remet progression et inventaire dans l'état de la dernière sauvegarde.
+func _restore_save() -> void:
+	if not _has_save:
+		return
+	dungeon_progress = _saved_progress.duplicate(true)
+	Inventory.restore(_saved_inventory)
 
 
 func respawn() -> void:
@@ -46,6 +79,7 @@ func respawn() -> void:
 	fade_out.tween_property(_overlay, "color:a", 1.0, fade_out_time)
 	await fade_out.finished
 
+	_restore_save()
 	get_tree().reload_current_scene()
 	await get_tree().create_timer(hold_time).timeout
 

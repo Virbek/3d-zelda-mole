@@ -77,6 +77,14 @@ signal room_changed(cell: Vector2i)
 	set(v):
 		wall_height = v
 		queue_preview()
+## Cinématique d'arrivée : la taupe défonce le mur du bas de la salle de
+## départ. Première fois = une seule fois pour de bon (sauvegardé dans
+## user://progress.cfg) ; à chaque lancement = une fois par partie (pratique
+## pour la régler).
+@export_enum("Première fois", "À chaque lancement", "Jamais") var intro_mode: int = 1
+## La salle de départ a une brèche au mur du bas, avec le tunnel derrière.
+@export var start_breach: bool = true
+
 ## Hauteur visible du mur du fond (toile de fond, la collision reste à wall_height).
 @export var back_wall_height: float = 6.5:
 	set(v):
@@ -150,6 +158,7 @@ var _doors: Array[DungeonDoor] = []
 var _closed: Array[DungeonDoor] = []  ## portes fermées par une salle qui enferme
 var _current := Vector2i.ZERO
 var _start := Vector2i.ZERO
+const IntroCinematic := preload("res://Script/dungeon/intro_cinematic.gd")
 var _transitioning: bool = false
 var _ready_done: bool = false
 var _preview_pending: bool = false
@@ -236,6 +245,8 @@ func _make_native_loop(key: String) -> void:
 ## Combat : les couches de rythme entrent l'une après l'autre (pouls, course,
 ## assaut). Salle vidée : elles s'effacent toutes, la musique continue seule.
 func _set_combat_music(on: bool) -> void:
+	if player != null:
+		player.set("in_combat", on)
 	if on == _in_combat:
 		return   # déjà dans le bon état (ex. réapparition dans une salle en combat)
 	_in_combat = on
@@ -440,6 +451,11 @@ func _build() -> void:
 		room.door_width = door_width
 		room.door_height = door_height
 		room.doors = room_doors.get(cell, {})
+		# Brèche au mur du bas de la salle de départ. Le tunnel de terre n'est
+		# creusé derrière que s'il n'y a pas de salle de ce côté : sinon la
+		# brèche donne sur le noir de la salle voisine (voilée).
+		room.breach_south = start_breach and cell == _start
+		room.breach_tunnel = not room_chars.has(cell + Vector2i(0, 1))
 		room.player = player
 		room.scenes = scenes
 		room.floor_color = floor_color
@@ -451,6 +467,7 @@ func _build() -> void:
 		add_child(room)
 		room.build()
 		room.cleared.connect(_on_room_cleared)
+		room.exit_reached.connect(_on_exit_reached)
 		room.key_collected.connect(_on_key_collected)
 		_rooms[cell] = room
 
@@ -538,6 +555,11 @@ func _enter_first_room() -> void:
 		found = _start
 	_snap_to(found)
 	_ready_done = true
+
+	if found == _start and start_room.breach_south and IntroCinematic.should_play(intro_mode):
+		var intro: Node = IntroCinematic.new()
+		add_child(intro)
+		intro.call("play", start_room, player, camera_rig)
 
 
 ## Changement sans animation : premier affichage, réapparition, téléport.
@@ -703,9 +725,70 @@ func _auto_walk(target: Vector3, d: Vector3) -> void:
 func _on_room_cleared(room: DungeonRoom) -> void:
 	(_progress()["cleared"] as Dictionary)[room.cell] = true
 	if room.cell == _current:
-		_play_clear_feedback()
+		# Salle vide dès l'entrée (aucun ennemi à faire apparaître) : elle est
+		# « nettoyée » sans combat, donc pas de ralenti de fin de combat.
+		if _in_combat:
+			_play_clear_feedback()
 		_reopen_closed()
 		_set_combat_music(false)
+
+
+## Le joueur passe la brèche ouverte par le boss : il s'avance dans la
+## lumière, l'écran blanchit puis noircit, et « FIN » s'affiche.
+var _ending: bool = false
+const MAIN_MENU := "res://MainMenu.tscn"
+
+func _on_exit_reached() -> void:
+	if _ending:
+		return
+	_ending = true
+	_transitioning = true
+	if player.has_method("start_auto_walk"):
+		player.start_auto_walk(Vector3.RIGHT)
+	if _music_tween != null and _music_tween.is_valid():
+		_music_tween.kill()
+
+	var layer := CanvasLayer.new()
+	layer.layer = 95
+	add_child(layer)
+	var veil := ColorRect.new()
+	veil.color = Color(1.0, 0.93, 0.8, 0.0)   # d'abord la lumière du dehors
+	veil.set_anchors_preset(Control.PRESET_FULL_RECT)
+	veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(veil)
+
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.modulate.a = 0.0
+	layer.add_child(box)
+	var font: Font = load("res://Font/SairaStencilOne.ttf") as Font
+	for line in [["FIN", 120, Color("#f0c27a")], ["Merci d'avoir joué !", 40, Color("#e8dcc8")]]:
+		var l := Label.new()
+		l.text = line[0]
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.add_theme_font_size_override("font_size", line[1])
+		l.add_theme_color_override("font_color", line[2])
+		if font != null:
+			l.add_theme_font_override("font", font)
+		box.add_child(l)
+
+	var t := create_tween()
+	t.tween_property(veil, "color:a", 1.0, 1.0).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	t.tween_property(veil, "color", Color(0.0, 0.0, 0.0, 1.0), 1.2)
+	t.tween_callback(func() -> void:
+		if player.has_method("stop_auto_walk"):
+			player.set_auto_walk_dir(Vector3.ZERO)
+	)
+	t.tween_property(box, "modulate:a", 1.0, 1.0)
+	# Puis retour au menu principal
+	t.tween_interval(3.5)
+	t.tween_property(box, "modulate:a", 0.0, 0.8)
+	t.tween_callback(func() -> void:
+		get_tree().paused = false
+		Engine.time_scale = 1.0
+		get_tree().change_scene_to_file(MAIN_MENU)
+	)
 
 
 ## Ralenti + secousse sur le dernier ennemi : marque la fin du combat.

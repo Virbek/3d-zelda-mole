@@ -10,6 +10,7 @@ extends CanvasLayer
 ## get_tree().paused.
 
 const ACTION := "pause"
+const MAIN_MENU := "res://MainMenu.tscn"
 
 var _root: Control
 var _resume_button: Button
@@ -95,6 +96,12 @@ func _on_restart_pressed() -> void:
 	Checkpoints.respawn()
 
 
+func _on_main_menu_pressed() -> void:
+	resume()
+	Engine.time_scale = 1.0
+	get_tree().change_scene_to_file(MAIN_MENU)
+
+
 func _on_quit_pressed() -> void:
 	get_tree().quit()
 
@@ -153,6 +160,7 @@ func _build_ui() -> void:
 	_volume_slider.value_changed.connect(_on_volume_changed)
 	box.add_child(_volume_slider)
 
+	_add_button(box, "Menu principal", _on_main_menu_pressed)
 	_add_button(box, "Quitter", _on_quit_pressed)
 
 	var hint := Label.new()

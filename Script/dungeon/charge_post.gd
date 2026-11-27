@@ -6,16 +6,19 @@ class_name ChargePost
 ## salle avec l'outil « S » de l'éditeur de donjon.
 ##
 ## Éteinte, son voyant est sombre et ses bandes de danger jaunes. Quand la
-## taupe passe à côté, une décharge cyan relie la borne au gantelet, le
-## voyant s'allume et un halo cyan reste au sol : c'est le point de
-## réapparition. Une seule borne est active à la fois (la dernière touchée).
+## taupe l'active (touche d'interaction, hors combat), une décharge cyan
+## relie la borne au gantelet, le voyant s'allume et un halo cyan reste au
+## sol : c'est le point de réapparition. Chaque appui SAUVEGARDE la
+## situation du donjon : à la mort, tout revient à ce moment-là. Une seule
+## borne est active à la fois (la dernière utilisée).
 ##
 ## Construite par script, comme le coffre. Origine au sol.
 
 const CYAN := Color(0.25, 0.84, 0.88)
 const DARK_LAMP := Color(0.29, 0.23, 0.19)
 
-@export var trigger_radius: float = 1.8       ## distance qui active la borne
+@export var trigger_radius: float = 1.8       ## distance d'interaction
+@export var prompt_height: float = 2.2
 @export var respawn_offset := Vector3(0.0, 0.0, 1.3)   ## où réapparaît la taupe (devant la borne, côté caméra)
 @export var arc_time: float = 0.45             ## durée de la décharge vers le gantelet
 
@@ -30,6 +33,7 @@ var _arc_t: float = -1.0
 var _arc_seed: int = 0
 var _active: bool = false
 var _player: Node3D = null
+var _prompt: InteractPrompt
 
 
 func _ready() -> void:
@@ -37,6 +41,9 @@ func _ready() -> void:
 	if Engine.is_editor_hint():
 		return
 	add_to_group(&"charge_post")
+	_prompt = InteractPrompt.new()
+	_prompt.position.y = prompt_height
+	add_child(_prompt)
 	# Après une mort, la borne qui sert de point de réapparition est déjà allumée
 	_set_active(_is_current(), false)
 
@@ -55,15 +62,38 @@ func _physics_process(delta: float) -> void:
 		# Le voyant respire doucement
 		var k: float = 0.75 + 0.25 * sin(Time.get_ticks_msec() * 0.004)
 		_light.light_energy = 1.2 * k
-		return
 
+
+# ---------------------------------------------------------------- INTERACTION
+
+func _process(_delta: float) -> void:
+	if Engine.is_editor_hint() or _prompt == null:
+		return
+	if _can_use():
+		if not _prompt.visible:
+			_prompt.show_action("Sauvegarder")
+	else:
+		_prompt.hide_prompt()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if Engine.is_editor_hint() or not event.is_action_pressed(InteractPrompt.ACTION):
+		return
+	if _can_use():
+		get_viewport().set_input_as_handled()
+		_activate()
+
+
+## À portée, libre d'agir (can_interact est faux en combat).
+func _can_use() -> bool:
+	if get_tree().paused:
+		return false
 	if _player == null or not is_instance_valid(_player):
 		_player = get_tree().get_first_node_in_group("player") as Node3D
-		if _player == null:
-			return
+	if _player == null or not _player.has_method("can_interact") or not _player.can_interact():
+		return false
 	var d := Vector2(_player.global_position.x - global_position.x, _player.global_position.z - global_position.z)
-	if d.length() <= trigger_radius:
-		_activate()
+	return d.length() <= trigger_radius
 
 
 func respawn_point() -> Vector3:
@@ -78,6 +108,7 @@ func _is_current() -> bool:
 	return Checkpoints.position.distance_to(respawn_point()) < 0.05
 
 
+## Chaque appui sauvegarde, même si la borne est déjà la borne active.
 func _activate() -> void:
 	Checkpoints.set_checkpoint(respawn_point())
 	# Les autres bornes s'éteignent : un seul point de réapparition à la fois

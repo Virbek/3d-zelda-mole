@@ -52,6 +52,9 @@ var is_dodging: bool = false
 ## Faux pendant un passage de porte : le Dungeon pilote alors la direction
 ## via set_auto_walk_dir, et les entrées du joueur sont ignorées.
 var controls_enabled: bool = true
+## Posé par le Dungeon : vrai tant que la salle courante a des ennemis.
+## Aucune interaction (coffre, socle, porte, dalle) pendant un combat.
+var in_combat: bool = false
 var _auto_dir := Vector3.ZERO
 var is_invulnerable: bool = false
 var _dodge_t: float = 0.0
@@ -74,6 +77,10 @@ func _ready() -> void:
 	add_to_group("player")
 	if Checkpoints.has_checkpoint:
 		global_position = Checkpoints.position
+		# Le rig s'est initialisé avant (enfant) à la position de la scène
+		if rig != null and rig.has_method("snap_to_player"):
+			rig.snap_to_player()
+			_resnap_rig_on_ground()
 	_base_max_health = max_health
 	max_health = _base_max_health + Inventory.bonus_max_health()
 	Inventory.changed.connect(_on_inventory_changed)
@@ -84,6 +91,17 @@ func _ready() -> void:
 	_ghosts.name = "DodgeGhosts"
 	add_child(_ghosts)
 	_ghosts.setup(rig)
+
+## Au tout premier instant, le sol n'est pas encore interrogeable : les pieds
+## sont posés à hauteur du joueur. Une fois retombé, on recale tout le rig.
+func _resnap_rig_on_ground() -> void:
+	for i in 30:
+		await get_tree().physics_frame
+		if is_on_floor():
+			break
+	if rig != null and rig.has_method("snap_to_player"):
+		rig.snap_to_player()
+
 
 func _physics_process(delta: float) -> void:
 	if _dead:
@@ -248,7 +266,7 @@ func end_interaction() -> void:
 
 ## Vrai si le joueur peut lancer une interaction (ouvrir un coffre...).
 func can_interact() -> bool:
-	return not _dead and controls_enabled and not is_dodging and is_on_floor() \
+	return not _dead and controls_enabled and not in_combat and not is_dodging and is_on_floor() \
 		and not combat.is_attacking and not combat.is_charging \
 		and not combat.is_punching and not combat.is_spinning
 
