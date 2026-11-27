@@ -22,7 +22,11 @@ class_name DungeonRoom
 signal cleared(room: DungeonRoom)
 ## Le joueur passe la brèche ouverte par le boss : fin du jeu.
 signal exit_reached
+## Le boss vient d'être jeté dans le mur : le chemin du retour se ferme.
+signal boss_thrown(room: DungeonRoom)
 signal key_collected(room: DungeonRoom)
+## Le boss est annoncé (son ombre tombe) : premier combat ou revanche.
+signal boss_spawned(room: DungeonRoom, rematch: bool)
 
 # --- Rempli par le Dungeon avant build() ---
 var data: RoomData
@@ -280,6 +284,7 @@ func _east_exit_center() -> Vector3:
 ## l'extérieur, une lumière du jour entre par le trou, et passer la brèche
 ## termine le jeu (exit_reached).
 func _open_east_exit() -> void:
+	boss_thrown.emit(self)
 	var c: Vector3 = _east_exit_center()
 	var world: Vector3 = to_global(c)
 	for m in _east_pieces:
@@ -344,14 +349,14 @@ func breach_point() -> Vector3:
 ## comprises), plus des gravats aux bords de la brèche.
 func _build_tunnel() -> void:
 	var z0: float = room_size.y * 0.5 + wall_thickness * 0.5   # bout du sol de la salle
-	var len: float = TUNNEL_LENGTH
+	var tunnel_len: float = TUNNEL_LENGTH
 	var w: float = BREACH_WIDTH
-	var cz: float = z0 + len * 0.5
-	_add_box("TunnelFloor", Vector3(w + 1.0, 1.0, len), Vector3(0.0, -0.5, cz), TUNNEL_COLOR.lightened(0.15), true)
+	var cz: float = z0 + tunnel_len * 0.5
+	_add_box("TunnelFloor", Vector3(w + 1.0, 1.0, tunnel_len), Vector3(0.0, -0.5, cz), TUNNEL_COLOR.lightened(0.15), true)
 	for sx in [-1.0, 1.0]:
-		_add_box("TunnelSide%d" % int(sx), Vector3(0.5, wall_height, len), Vector3(sx * (w * 0.5 + 0.25), wall_height * 0.5, cz), TUNNEL_COLOR, true)
-	_add_box("TunnelEnd", Vector3(w + 1.0, wall_height, 0.5), Vector3(0.0, wall_height * 0.5, z0 + len + 0.25), TUNNEL_COLOR.darkened(0.3), true)
-	_add_box("TunnelRoof", Vector3(w + 1.0, 0.4, len), Vector3(0.0, wall_height + 0.2, cz), TUNNEL_COLOR.darkened(0.5), true)
+		_add_box("TunnelSide%d" % int(sx), Vector3(0.5, wall_height, tunnel_len), Vector3(sx * (w * 0.5 + 0.25), wall_height * 0.5, cz), TUNNEL_COLOR, true)
+	_add_box("TunnelEnd", Vector3(w + 1.0, wall_height, 0.5), Vector3(0.0, wall_height * 0.5, z0 + tunnel_len + 0.25), TUNNEL_COLOR.darkened(0.3), true)
+	_add_box("TunnelRoof", Vector3(w + 1.0, 0.4, tunnel_len), Vector3(0.0, wall_height + 0.2, cz), TUNNEL_COLOR.darkened(0.5), true)
 	_build_breach_rubble()
 
 
@@ -882,6 +887,7 @@ func _spawn(kind: String, local_pos: Vector3, props: Dictionary = {}) -> void:
 	var sky: bool = kind == "boss"
 	var warn: float = spawn_telegraph_time * (1.5 if sky else 1.0)
 	if sky:
+		boss_spawned.emit(self, bool(props.get("rematch", false)))
 		SpawnFxLib.falling_shadow(self, local_pos, warn + BOSS_DROP_TIME, 1.8)
 	elif air:
 		SpawnFxLib.falling_shadow(self, local_pos, warn + FLY_IN_TIME, 0.6)
@@ -909,6 +915,7 @@ func _spawn(kind: String, local_pos: Vector3, props: Dictionary = {}) -> void:
 
 	# Pendant l'arrivée : ni IA, ni physique, ni coups (le nœud est désactivé)
 	e.process_mode = Node.PROCESS_MODE_DISABLED
+	_face_player(e, final)
 	var t := create_tween()
 	if sky:
 		e.position = final + Vector3.UP * BOSS_DROP_HEIGHT
@@ -924,12 +931,25 @@ func _spawn(kind: String, local_pos: Vector3, props: Dictionary = {}) -> void:
 		t.tween_property(e, "position", final, EMERGE_TIME).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	t.tween_callback(func() -> void:
 		if is_instance_valid(e):
+			_face_player(e, final)   # le joueur a pu bouger pendant l'annonce
 			e.process_mode = Node.PROCESS_MODE_INHERIT
 	)
 
 
 ## Le boss s'écrase au sol : gerbe de sable, anneau de poussière, grosse
 ## secousse, et le joueur resté sous l'ombre est touché.
+## Tourne l'ennemi vers le joueur (même convention que leur _face : l'avant
+## est -Z). local_pos : sa place finale dans la salle.
+func _face_player(e: Node3D, local_pos: Vector3) -> void:
+	if player == null or not is_instance_valid(player):
+		return
+	var dir: Vector3 = player.global_position - to_global(local_pos)
+	dir.y = 0.0
+	if dir.length() < 0.01:
+		return
+	e.rotation.y = atan2(-dir.x, -dir.z)
+
+
 func _boss_impact(local_pos: Vector3) -> void:
 	if not is_active:
 		return
@@ -1032,11 +1052,11 @@ func _give_reward() -> void:
 
 ## Remet la salle dans l'état mémorisé par le donjon après une mort :
 ## nettoyée (plus d'ennemis), et coffre déjà présent / déjà ouvert.
-func restore_progress(cleared: bool, key_given: bool) -> void:
-	is_cleared = cleared
+func restore_progress(was_cleared: bool, key_given: bool) -> void:
+	is_cleared = was_cleared
 	_key_given = key_given
 	# Coffre qui n'apparaît qu'à la fin du combat : il est déjà là
-	if cleared and _chest == null:
+	if was_cleared and _chest == null:
 		match data.key_source:
 			RoomData.KeySource.ON_CLEAR:
 				_spawn_chest(_key_pos if data.layout.contains("k") else _chest_pos)

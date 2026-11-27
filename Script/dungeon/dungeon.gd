@@ -139,6 +139,18 @@ signal room_changed(cell: Vector2i)
 @export var music_layer_fade_in: float = 1.5
 ## Fondu de sortie des couches quand la salle est vidée
 @export var music_fade_time: float = 2.5
+## Boss : son propre thème remplace la musique du donjon (music_boss), et
+## une version plus énervée pour la revanche (music_boss_rage).
+## Fondu d'entrée de la musique du donjon à la fin de la cinématique d'intro
+@export var music_intro_fade_in: float = 3.0
+## Fondu d'entrée de la musique au lancement quand il n'y a pas de cinématique
+@export var music_start_fade_in: float = 1.5
+@export var music_boss_db: float = -4.0
+@export var music_boss_fade_in: float = 0.4
+## Les thèmes du boss commencent par une intro jouée une fois (4 mesures),
+## puis bouclent sur le reste. À changer seulement si les fichiers sont refaits.
+@export var music_boss_intro_sec: float = 16.0 * 60.0 / 140.0
+@export var music_boss_rage_intro_sec: float = 16.0 * 60.0 / 165.0
 
 const DOOR_OPEN := 1
 const DOOR_LOCKED := 2
@@ -168,6 +180,8 @@ const MUSIC_LAYERS := ["music_layer_1", "music_layer_2", "music_layer_3"]
 var _music_layers: Array[Node] = []   ## null si le fichier manque
 var _in_combat: bool = false
 var _music_tween: Tween = null
+var _music_base: Node = null           ## music_dungeon
+var _music_boss: Node = null           ## thème du boss en cours, null sinon
 
 
 func _ready() -> void:
@@ -222,7 +236,10 @@ func _start_ambient_sound() -> void:
 	_make_native_loop("music_dungeon")
 	for key: String in MUSIC_LAYERS:
 		_make_native_loop(key)
-	Sfx.attach_loop("music_dungeon", self, music_explore_db, false)
+	# Démarre muette : le chargement de la scène (construction des salles,
+	# premiers rendus) prend du temps et on en entendait un bout. C'est
+	# _enter_first_room qui l'ouvre, ou la laisse muette pour la cinématique.
+	_music_base = Sfx.attach_loop("music_dungeon", self, MUSIC_SILENT_DB, false)
 	for key: String in MUSIC_LAYERS:
 		_music_layers.append(Sfx.attach_loop(key, self, MUSIC_SILENT_DB, false))
 
@@ -233,12 +250,14 @@ func _start_ambient_sound() -> void:
 
 ## Boucle gérée par le flux lui-même, sans trou entre deux tours : la relance
 ## par « finished » d'attach_loop ferait dériver les couches les unes des autres.
-func _make_native_loop(key: String) -> void:
+## begin_sec > 0 : l'intro avant ce point n'est jouée qu'une fois.
+func _make_native_loop(key: String, begin_sec: float = 0.0) -> void:
 	var s: AudioStreamWAV = Sfx.sounds.get(key) as AudioStreamWAV
 	if s == null or s.loop_mode == AudioStreamWAV.LOOP_FORWARD:
 		return
-	s.loop_begin = 0
-	s.loop_end = int(round(s.get_length() * s.mix_rate))
+	var total: int = int(round(s.get_length() * s.mix_rate))
+	s.loop_begin = clampi(int(round(begin_sec * s.mix_rate)), 0, total - 1)
+	s.loop_end = total
 	s.loop_mode = AudioStreamWAV.LOOP_FORWARD
 
 
@@ -255,20 +274,73 @@ func _set_combat_music(on: bool) -> void:
 		_music_tween.kill()
 	_music_tween = create_tween().set_parallel(true)
 
+	# Contre le boss, son thème joue seul : les couches restent muettes
+	var layers_on: bool = on and not is_instance_valid(_music_boss)
 	var count: int = 0
 	for i in _music_layers.size():
 		var p: Node = _music_layers[i]
 		if not is_instance_valid(p):
 			continue
-		if on:
+		if layers_on:
 			var db: float = music_layer_db[i] if i < music_layer_db.size() else -6.0
 			var delay: float = music_layer_delay[i] if i < music_layer_delay.size() else 0.0
 			_fade_loop(p, db, music_layer_fade_in, delay)
 		else:
-			_fade_loop(p, MUSIC_SILENT_DB, music_fade_time)
+			_fade_loop(p, MUSIC_SILENT_DB, music_boss_fade_in if on else music_fade_time)
 		count += 1
 	if count == 0:
 		_music_tween.kill()   # un tween sans étape lève une erreur
+
+	if not on:
+		_stop_boss_music()
+
+
+## Le boss est annoncé : son thème part tout de suite (version énervée pour
+## la revanche), la musique du donjon et ses couches s'effacent.
+func _on_boss_spawned(room: DungeonRoom, rematch: bool) -> void:
+	if room.cell != _current:
+		return
+	var key: String = "music_boss_rage" if rematch else "music_boss"
+	if not Sfx.sounds.has(key):
+		return
+	_stop_boss_music()
+	_make_native_loop(key, music_boss_rage_intro_sec if rematch else music_boss_intro_sec)
+	_music_boss = Sfx.attach_loop(key, self, MUSIC_SILENT_DB, false)
+	_fade_node(_music_boss, music_boss_db, music_boss_fade_in)
+	_fade_node(_music_base, MUSIC_SILENT_DB, music_boss_fade_in * 2.0)
+	if _in_combat:
+		# Boss arrivé en cours de combat (vague suivante) : on coupe les couches
+		_in_combat = false
+		_set_combat_music(true)
+
+
+## Fin du combat de boss (victoire, ou sortie de la salle) : le thème
+## s'efface puis est libéré, la musique du donjon revient.
+func _stop_boss_music() -> void:
+	if not is_instance_valid(_music_boss):
+		_music_boss = null
+		return
+	var old: Node = _music_boss
+	_music_boss = null
+	_fade_node(old, MUSIC_SILENT_DB, music_fade_time, true)
+	_fade_node(_music_base, music_explore_db, music_fade_time * 1.5)
+
+
+## Fondu propre à un lecteur : un nouveau fondu remplace le précédent.
+func _fade_node(p: Node, to_db: float, duration: float, free_after: bool = false) -> void:
+	if not is_instance_valid(p):
+		return
+	# has_meta d'abord : get_meta(clé, null) lève une erreur si la clé manque
+	# (un défaut null compte comme « pas de défaut »).
+	if p.has_meta("fade_tween"):
+		var prev: Variant = p.get_meta("fade_tween")
+		if prev is Tween and (prev as Tween).is_valid():
+			(prev as Tween).kill()
+	var t := create_tween()
+	t.tween_method(_set_loop_db.bind(p), float(p.get_meta("base_db", 0.0)), to_db, duration)
+	if free_after:
+		t.tween_callback(Sfx.stop_loop.bind(p))
+	p.set_meta("fade_tween", t)
 
 
 func _fade_loop(p: Node, to_db: float, duration: float, delay: float = 0.0) -> void:
@@ -468,6 +540,8 @@ func _build() -> void:
 		room.build()
 		room.cleared.connect(_on_room_cleared)
 		room.exit_reached.connect(_on_exit_reached)
+		room.boss_thrown.connect(_on_boss_thrown)
+		room.boss_spawned.connect(_on_boss_spawned)
 		room.key_collected.connect(_on_key_collected)
 		_rooms[cell] = room
 
@@ -557,9 +631,21 @@ func _enter_first_room() -> void:
 	_ready_done = true
 
 	if found == _start and start_room.breach_south and IntroCinematic.should_play(intro_mode):
+		# Pas de musique pendant la cinématique : elle tourne en silence (les
+		# couches restent calées) et monte en fondu quand la cinématique finit.
 		var intro: Node = IntroCinematic.new()
 		add_child(intro)
+		intro.connect(&"finished", _on_intro_finished)
 		intro.call("play", start_room, player, camera_rig)
+	elif not is_instance_valid(_music_boss):
+		# Pas de cinématique (déjà vue, ou réapparition) : la musique monte
+		# maintenant que la scène est prête.
+		_fade_node(_music_base, music_explore_db, music_start_fade_in)
+
+
+func _on_intro_finished() -> void:
+	if not is_instance_valid(_music_boss):
+		_fade_node(_music_base, music_explore_db, music_intro_fade_in)
 
 
 ## Changement sans animation : premier affichage, réapparition, téléport.
@@ -578,6 +664,11 @@ func _snap_to(cell: Vector2i) -> void:
 
 
 func _activate(room: DungeonRoom) -> void:
+	# Nouvelle salle (ou réapparition) : un combat de boss en cours est fini.
+	# Si c'est encore sa salle, il est ré-annoncé et son thème repart.
+	if is_instance_valid(_music_boss):
+		_stop_boss_music()
+		_in_combat = false
 	var alive: int = room.activate(player.global_position)
 	_set_combat_music(alive > 0)
 	# Toute salle où il y a un combat enferme le joueur jusqu'à la fin des
@@ -731,6 +822,15 @@ func _on_room_cleared(room: DungeonRoom) -> void:
 			_play_clear_feedback()
 		_reopen_closed()
 		_set_combat_music(false)
+
+
+## Fin de la revanche : la porte du bas de la salle du boss est condamnée,
+## on ne peut plus redescendre. Retirée des portes à rouvrir en fin de combat.
+func _on_boss_thrown(room: DungeonRoom) -> void:
+	for d in _doors:
+		if d.connects(room.cell) and d.other(room.cell) == room.cell + Vector2i(0, 1):
+			d.condemn()
+			_closed.erase(d)
 
 
 ## Le joueur passe la brèche ouverte par le boss : il s'avance dans la

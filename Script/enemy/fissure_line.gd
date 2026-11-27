@@ -25,11 +25,11 @@ var _hit: bool = false
 var _done: bool = false
 
 
-static func spawn(parent: Node, origin: Vector3, dir: Vector3, len: float, spd: float, band: float, dmg: int) -> FissureLine:
+static func spawn(parent: Node, origin: Vector3, dir: Vector3, line_len: float, spd: float, band: float, dmg: int) -> FissureLine:
 	var f := FissureLine.new()
 	dir.y = 0.0
 	f.direction = dir.normalized() if dir.length() > 0.01 else Vector3.FORWARD
-	f.length = len
+	f.length = line_len
 	f.speed = spd
 	f.width = band
 	f.damage = dmg

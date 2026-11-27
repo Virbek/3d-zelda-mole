@@ -72,6 +72,8 @@ var _door_light: OmniLight3D
 var _panels: Array[Node3D] = []      ## battant blindé (porte verrouillée)
 var _bars: Array[Node3D] = []        ## grille (porte fermée pendant un combat)
 var _tween: Tween
+var _condemned: bool = false
+const SpawnFxLib := preload("res://Script/fx/spawn_fx.gd")   ## fermée pour de bon (fin du jeu) : open() ne fait plus rien
 
 ## Tenu à jour par le Dungeon : change le texte affiché devant la porte.
 var has_key: bool = false
@@ -384,7 +386,7 @@ func set_state_instant(s: DoorState) -> void:
 
 ## La porte s'enfonce dans le sol, puis laisse passer.
 func open() -> void:
-	if state == DoorState.OPEN:
+	if state == DoorState.OPEN or _condemned:
 		return
 	# Grille (porte de combat) : même « shruuu » qu'à la montée. Porte
 	# blindée verrouillée : le grondement lourd.
@@ -398,6 +400,37 @@ func open() -> void:
 	_tween.tween_property(_blocker, "position:y", -height, 0.35)\
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	_tween.tween_callback(_on_opened)
+
+
+## Condamnée pour de bon : grille fermée, planches clouées en croix et
+## éboulis de chaque côté. Plus jamais rouverte (open() l'ignore).
+func condemn() -> void:
+	if _condemned:
+		return
+	_condemned = true
+	if state != DoorState.CLOSED:
+		close()
+	var normal: Vector3 = _oriented(Vector3(0.0, 0.0, 1.0))
+	var plank := Color("#7a5232")
+	var rock := Color("#5e4632")
+	var halves: Array = [[half_a, Vector3(cell_a.x - cell_b.x, 0.0, cell_a.y - cell_b.y)], [half_b, Vector3(cell_b.x - cell_a.x, 0.0, cell_b.y - cell_a.y)]]
+	for entry in halves:
+		var half: Node3D = entry[0]
+		var side: Vector3 = entry[1]
+		if half == null:
+			continue
+		# Côté de cette moitié, en « épaisseur » du repère de la porte
+		var d: float = signf(side.dot(normal)) * (depth * 0.5 + 0.12)
+		for k in [-1.0, 1.0]:
+			var p := _box(self, Vector3(width * 1.15, 0.18, 0.06), Vector3(0.0, height * 0.5, d), plank)
+			p.rotate(normal, k * 0.6)
+			p.reparent(half)
+		for i in 6:
+			var r := _box(self, Vector3.ONE * randf_range(0.3, 0.6), Vector3(randf_range(-width * 0.5, width * 0.5), randf_range(0.1, 0.4), d + signf(d) * randf_range(0.1, 0.6)), rock)
+			r.rotation = Vector3(randf(), randf(), randf())
+			r.reparent(half)
+	SpawnFxLib.sand_burst(self, Vector3.UP * 0.2, 1.6, 14, 1.0)
+	Sfx.play("boss_land", global_position, -2.0)
 
 
 ## Des barreaux sortent du sol pour enfermer le joueur.

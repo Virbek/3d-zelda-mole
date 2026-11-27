@@ -27,7 +27,12 @@ signal died
 @export var always_aggro: bool = true
 @export var detect_range: float = 13.0
 @export var lose_range: float = 17.0
-@export var flee_range: float = 5.5    ## trop près : il fuit
+## Vrai : ne fuit jamais. Il fonce vers le joueur en tournoyant et tire dès
+## qu'il est rechargé, à n'importe quelle distance ≤ keep_max (bout portant
+## compris), sans abandonner sa visée si le joueur lui fonce dessus.
+## Faux : ancien comportement (garde ses distances, fuit au contact).
+@export var never_flee: bool = true
+@export var flee_range: float = 5.5    ## trop près : il fuit (si never_flee est faux)
 @export var keep_max: float = 9.0      ## trop loin : il avance
 @export var strafe_speed: float = 2.4
 @export var run_speed: float = 3.2     ## vitesse de fuite à distance (le joueur reste bien plus rapide)
@@ -238,6 +243,10 @@ func _reposition(delta: float) -> void:
 		_set_state(State.IDLE)
 		return
 
+	if never_flee:
+		_reposition_aggressive(d, delta)
+		return
+
 	# En bonne fourchette, rechargé et avec une ligne de vue dégagée : il vise.
 	# Sinon il continue de tourner autour pour trouver un angle.
 	if d >= flee_range and d <= keep_max and _cooldown <= 0.0 and _has_line_of_sight():
@@ -272,6 +281,34 @@ func _reposition(delta: float) -> void:
 	velocity.z = move.z * spd
 	# En fuite, il regarde où il court ; sinon il garde le joueur en vue
 	_face(move if d < flee_range else to_player, delta)
+
+
+## Sans fuite : il tire dès qu'il peut, sinon il fond sur le joueur en
+## spirale (difficile à cueillir de face) et lui tourne autour au contact.
+func _reposition_aggressive(d: float, delta: float) -> void:
+	if d <= keep_max and _cooldown <= 0.0 and _has_line_of_sight():
+		_close_shot = d <= close_shot_range   # bout portant : visée plus courte
+		_set_state(State.AIM)
+		_start_aim()
+		return
+
+	var to_player: Vector3 = _dir_to_player()
+	var side: Vector3 = to_player.cross(Vector3.UP) * _strafe_dir
+	var move: Vector3
+	var spd: float
+	if d > keep_max:
+		move = to_player                          # trop loin : il fonce
+		spd = run_speed
+	elif d > close_range:
+		move = to_player + side * 0.6             # approche en spirale
+		spd = strafe_speed
+	else:
+		move = side                               # au contact : il tourne autour, sans reculer
+		spd = strafe_speed * 0.8
+	move = move.normalized()
+	velocity.x = move.x * spd
+	velocity.z = move.z * spd
+	_face(to_player, delta)
 
 
 ## Direction de fuite : à l'opposé du joueur si possible, sinon l'angle libre
@@ -316,7 +353,7 @@ func _aim(delta: float) -> void:
 
 	# Le joueur a foncé sur lui : il abandonne son tir et prend la fuite
 	# (sauf s'il a justement armé un tir à bout portant)
-	if not _close_shot and _distance_to_player() < panic_range:
+	if not never_flee and not _close_shot and _distance_to_player() < panic_range:
 		_cancel_aim()
 		_cooldown = maxf(_cooldown, 0.8)
 		return

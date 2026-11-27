@@ -1824,15 +1824,15 @@ func pose_body(lean_forward_deg: float, drop: float, forward: float, time: float
 ## Poings vers left / right, et buste dans la pose donnée, en time secondes.
 ## look_at : point visé par les doigts (INF = orientation inchangée).
 ## palm_down : paumes vers le sol (prise sur un dessus), sinon face à face.
-func pose_hands(left: Vector3, right: Vector3, time: float, lean_forward_deg: float = 0.0, drop: float = 0.0, forward: float = 0.0, look_at: Vector3 = Vector3.INF, palm_down: bool = false) -> Tween:
+func pose_hands(left: Vector3, right: Vector3, time: float, lean_forward_deg: float = 0.0, drop: float = 0.0, forward: float = 0.0, look_target: Vector3 = Vector3.INF, palm_down: bool = false) -> Tween:
 	var t := pose_body(lean_forward_deg, drop, forward, time)
 	t.tween_property(hand_l, "global_position", left, time)
 	t.tween_property(hand_r, "global_position", right, time)
-	if look_at.is_finite():
+	if look_target.is_finite():
 		var mid: Vector3 = (left + right) * 0.5
 		var out_l: Vector3 = Vector3.UP if palm_down else Vector3(left.x - mid.x, 0.0, left.z - mid.z)
 		var out_r: Vector3 = Vector3.UP if palm_down else Vector3(right.x - mid.x, 0.0, right.z - mid.z)
-		_tween_gauntlets(t, look_at - left, out_l, look_at - right, out_r, time)
+		_tween_gauntlets(t, look_target - left, out_l, look_target - right, out_r, time)
 	return t
 
 

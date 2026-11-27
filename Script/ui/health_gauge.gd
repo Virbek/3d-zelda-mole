@@ -173,7 +173,7 @@ func _draw_gauge(c: Vector2) -> void:
 	if _health < _max_health:
 		needle_col = recover_color
 		if _is_draining():
-			var blink: bool = int(Time.get_ticks_msec() / 180) % 2 == 0
+			var blink: bool = int(Time.get_ticks_msec() / 180.0) % 2 == 0
 			needle_col = drain_color if blink else drain_color.darkened(0.35)
 	var na: float = _gauge_angle(_needle_deg)
 	var tip: Vector2 = c + Vector2(cos(na), sin(na)) * (r - 5.0)

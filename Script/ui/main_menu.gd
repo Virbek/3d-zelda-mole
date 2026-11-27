@@ -112,11 +112,11 @@ func _build() -> void:
 	add_child(_fade)
 
 
-func _label(text: String, size: int, color: Color, font: Font) -> Label:
+func _label(text: String, text_size: int, color: Color, font: Font) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_font_size_override("font_size", text_size)
 	l.add_theme_color_override("font_color", color)
 	if font != null:
 		l.add_theme_font_override("font", font)

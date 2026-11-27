@@ -982,13 +982,28 @@ func _die() -> void:
 
 ## Chute en arrière, rebond sur le dos, poussière : puis plus rien ne bouge.
 func _lie_down() -> void:
-	# Repart de la hauteur actuelle du mesh (l'écrasement du coup l'a décalé)
+	# Mort en plein armé de saut : le modèle était tassé. On lui rend sa
+	# taille, sinon la carcasse au sol reste plus petite.
+	if _hit_react != null:
+		_hit_react.stop()
+	_set_mesh_scale(_base_scale)
+	mesh.rotation = Vector3.ZERO
+	# Repart de la hauteur actuelle du mesh
 	_lie_offset_y = mesh.position.y - _mesh_rest_y
 	# Plus un ennemi : la barre de vie se cache, la caméra et les attaques
 	# du joueur l'ignorent
 	remove_from_group("enemy")
 	remove_from_group("boss")
 	var t := create_tween()
+	# Mort en l'air (saut, bond) : il retombe d'abord au sol
+	var height: float = global_position.y - _ground_y
+	if height > 0.05:
+		t.tween_property(self, "global_position:y", _ground_y, clampf(sqrt(height) * 0.25, 0.15, 0.5))\
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		t.tween_callback(func() -> void:
+			Sfx.play("boss_land", global_position, 0.0)
+			_shake(0.6)
+		)
 	for i in 4:
 		t.tween_property(_mat, "albedo_color", flash_color, 0.07)
 		t.tween_property(_mat, "albedo_color", _base_color, 0.07)
