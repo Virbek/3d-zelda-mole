@@ -1,9 +1,11 @@
 extends Node3D
 class_name Gauntlet
 
-## Gantelet mécanique de la taupe, construit en primitives (pas de modèle
-## importé) : poing rouillé, jointures d'acier, manchette à rayures, deux
-## pistons et un petit écran cyan sur le poignet.
+## Gantelet mécanique de la taupe : poing rouillé, doigts d'acier, manchette
+## à rayures, deux pistons et un petit écran cyan sur le poignet.
+##
+## Modèle Blender (art_src/blender/gear.py -> Asset/Model/Player/gauntlet.glb)
+## quand use_model est vrai ; sinon l'ancienne version en primitives.
 ##
 ## Orienté comme la main qui le porte : l'avant (les jointures) est en -Z.
 ## Toutes les cotes sont en mètres, dans le repère monde : le rig compense
@@ -18,6 +20,12 @@ const STEEL_DARK := Color("#4a4c4b")
 const STEEL_LIGHT := Color("#c7c7cc")
 const HAZARD := Color("#e0a23a")
 const SCREEN := Color("#5fe1ff")
+
+const MODEL: PackedScene = preload("res://Asset/Model/Player/gauntlet.glb")
+## Modèle Blender (true) ou ancienne construction en primitives (false).
+static var use_model: bool = true
+## Doit suivre HAND_SCALE dans art_src/blender/gear.py
+const MODEL_SCALE := 1.05
 
 ## Côté de la main : -1 gauche, +1 droite. Le pouce est du côté intérieur.
 var side: float = 1.0
@@ -41,6 +49,14 @@ static func create(hand_side: float, outline: float = 0.008) -> Gauntlet:
 
 ## Applique (ou retire, avec null) un matériau par-dessus toutes les pièces.
 ## Sert au flash blanc de la charge pleine.
+## Point d'attache du filament électrique : arrière de la manchette.
+## Avec le modèle Blender, suit son échelle (HAND_SCALE de gear.py).
+func cuff_anchor() -> Vector3:
+	if use_model:
+		return Vector3(0.0, 0.0, 0.2 * MODEL_SCALE)
+	return Vector3(0.0, 0.0, 0.2)
+
+
 func set_overlay(mat: Material) -> void:
 	for p in _parts:
 		p.material_overlay = mat
@@ -57,6 +73,31 @@ func set_open(open: bool) -> void:
 # ---------------------------------------------------------------- CONSTRUCTION
 
 func _build() -> void:
+	if use_model:
+		_build_model()
+	else:
+		_build_primitives()
+
+
+func _build_model() -> void:
+	var s: String = "L" if side < 0.0 else "R"
+	var part: Node3D = ModelSkin.extract(MODEL, "Gauntlet_" + s)
+	add_child(part)
+	var colors: Dictionary = {
+		"rust": RUST, "rust_dark": RUST_DARK, "steel": STEEL,
+		"steel_dark": STEEL_DARK, "steel_light": STEEL_LIGHT, "hazard": HAZARD,
+	}
+	_parts = ModelSkin.apply(part, colors, {"screen": SCREEN}, outline_width)
+	var fist: Node3D = part.find_child("Fist_" + s, true, false) as Node3D
+	var opened: Node3D = part.find_child("Open_" + s, true, false) as Node3D
+	if fist != null:
+		_fist_only.append(fist)
+	if opened != null:
+		_open_only.append(opened)
+	set_open(false)
+
+
+func _build_primitives() -> void:
 	var inner: float = -side   # côté du pouce
 
 	# --- Poing : le gros bloc rouillé ---
@@ -173,7 +214,7 @@ func _add(mesh: Mesh, pos: Vector3, rot: Vector3, color: Color, outlined: bool) 
 
 
 func _toon_material(color: Color, outlined: bool) -> Material:
-	return ToonBuilder.toon_material(color, outline_width if outlined else 0.0)
+	return ToonBuilder.toon_material(color, outline_width if outlined else 0.0, true)
 
 
 ## L'écran brille un peu, sans être affecté par l'éclairage.

@@ -6,6 +6,10 @@ class_name BossRobotModel
 ## jusqu'au sol et finissent par de gros poings carrés. Un réacteur à chaque
 ## coude : c'est lui qui le propulse en l'air.
 ##
+## Modèle Blender (art_src/blender/boss.py -> Asset/Model/Enemy/boss.glb)
+## quand use_model est vrai ; sinon l'ancienne version en primitives. Les
+## deux partagent les mêmes cotes et les mêmes pivots (Head, Arm_L/R, Flame_L/R).
+##
 ## Origine au sol, avant en -Z, cotes en mètres. Le script du boss appelle
 ## drive(pose, k, delta) à chaque frame :
 ##   "rest"   : bras ballants, léger balancement
@@ -18,6 +22,10 @@ class_name BossRobotModel
 
 @export var outline_width: float = 0.02
 @export var tint_strength: float = 0.7
+
+const MODEL: PackedScene = preload("res://Asset/Model/Enemy/boss.glb")
+## Modèle Blender (true) ou ancienne construction en primitives (false).
+@export var use_model: bool = true
 
 const SHOULDER := Vector3(0.98, 2.2, 0.0)
 const ARM_LEN := 2.0
@@ -142,6 +150,69 @@ func _build() -> void:
 	_eye_mat = B.glow_material(B.SCREEN)
 	_nozzle_mat = B.glow_material(B.SCREEN)
 	_flame_mat = B.glow_material(Color(1.0, 0.55, 0.15))
+	if use_model:
+		_build_model()
+	else:
+		_build_primitives()
+
+
+func _build_model() -> void:
+	var B := ToonBuilder
+	var model: Node3D = MODEL.instantiate() as Node3D
+	add_child(model)
+	_head = model.find_child("Head", true, false) as Node3D
+	for s: String in ["L", "R"]:
+		_arms.append(model.find_child("Arm_" + s, true, false) as Node3D)
+		var anchor := model.find_child("Flame_" + s, true, false) as Node3D
+		_flames.append(_make_flame(anchor))
+
+	var colors: Dictionary = {
+		"rust": B.RUST, "rust_dark": B.RUST_DARK, "rust_light": B.RUST.lightened(0.12),
+		"steel": B.STEEL, "steel_dark": B.STEEL_DARK, "steel_light": B.STEEL_LIGHT,
+		"hazard": B.HAZARD, "hazard_dark": Color("#2a2420"), "cream": Color("#e8dcc0"),
+		"needle": B.THREAT,
+	}
+	for node: Node in model.find_children("*", "MeshInstance3D", true, false):
+		var mi := node as MeshInstance3D
+		for i in mi.mesh.get_surface_count():
+			var src: Material = mi.mesh.surface_get_material(i)
+			var mat_name: String = src.resource_name if src != null else ""
+			match mat_name:
+				"eye":
+					mi.set_surface_override_material(i, _eye_mat)
+				"nozzle":
+					mi.set_surface_override_material(i, _nozzle_mat)
+				_:
+					var c: Color = colors.get(mat_name, B.RUST)
+					var mat: Material = B.toon_material(c, outline_width, true)
+					mi.set_surface_override_material(i, mat)
+					if mat is ShaderMaterial:
+						_tinted.append([mat, c])
+
+
+## Flamme de propulsion sous le poing (cachée au repos). Le cône pend sous
+## son support : étirer le support en Y l'allonge vers le bas sans le
+## décoller du poing.
+func _make_flame(anchor: Node3D) -> Node3D:
+	var flame := MeshInstance3D.new()
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.3
+	cone.bottom_radius = 0.02
+	cone.height = 1.0
+	cone.radial_segments = 8
+	flame.mesh = cone
+	flame.material_override = _flame_mat
+	flame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	flame.position = Vector3(0.0, -0.5, 0.0)
+	var holder := Node3D.new()
+	anchor.add_child(holder)
+	holder.add_child(flame)
+	holder.visible = false
+	return holder
+
+
+func _build_primitives() -> void:
+	var B := ToonBuilder
 
 	# --- Corps-chaudière : plus large en haut, base en jupe sombre ---
 	var body := _cyl(0.78, 0.66, 2.0, Vector3(0.0, 1.4, 0.0), B.RUST, 14)
@@ -248,7 +319,7 @@ func _part(mesh: Mesh, pos: Vector3, color: Color, parent: Node3D = null) -> Mes
 	var m := MeshInstance3D.new()
 	m.mesh = mesh
 	m.position = pos
-	var mat: Material = ToonBuilder.toon_material(color, outline_width)
+	var mat: Material = ToonBuilder.toon_material(color, outline_width, true)
 	m.material_override = mat
 	if mat is ShaderMaterial:
 		_tinted.append([mat, color])

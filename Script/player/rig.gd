@@ -135,6 +135,18 @@ extends Node3D
 @export var attack_height: float = 0.15     ## hauteur relative au centre du corps
 @export var attack_arc: float = 180.0       ## amplitude du balayage en degrés
 @export var attack_recover: float = 0.12    ## retour progressif au ressort
+@export_group("Poids du coup")
+## Le poing s'arme en arrière avant de partir (rien de mou : il prend de
+## l'élan), part d'un coup, dépasse sa cible puis revient se poser.
+@export var attack_anticipation_deg: float = 22.0  ## recul de l'armé, en degrés d'arc
+@export var attack_anticipation_end: float = 0.2   ## fin de l'armé (part du coup)
+@export var attack_strike_end: float = 0.65        ## fin de la frappe
+@export var attack_overshoot_deg: float = 14.0     ## dépassement au bout de la frappe
+@export var attack_cock: float = 0.22              ## poing ramené vers le corps à l'armé (part de la portée)
+@export var attack_extend: float = 0.18            ## bras tendu au milieu de la frappe (part de la portée)
+@export var attack_stretch: float = 0.35           ## étirement du gantelet pendant la frappe
+@export var use_fist_trails: bool = true           ## traînée d'air derrière les poings qui frappent
+@export_group("")
 
 @export_group("Coup 3 (frappe verticale)")
 @export var slam_wind_end: float = 0.45     ## fin de l'armé (fraction du coup)
@@ -325,13 +337,21 @@ var _punch_hit: bool = false       ## le poing a buté : il ne repart pas en ava
 ## Rotation sur l'axe du bras pendant le déplacement : -90 = pouces vers le bas
 @export var gauntlet_move_roll: float = -90.0
 var _gauntlet_r: Gauntlet = null
+var _trail_l: FistTrail = null
+var _trail_r: FistTrail = null
 
 @export_group("Bottes")
 @export var use_boots: bool = true          ## remplace les sphères des pieds par des bottes mécaniques
 @export var boot_scale: float = 1.15
 @export var boot_toe_lift: float = 18.0     ## bascule de la pointe pendant un pas (degrés)
 @export var boot_turn_limit: float = 70.0   ## au-delà, un pied posé pivote sur place
-@export var use_outfit: bool = true         ## foulard, ceinture et petit sac de la taupe
+@export var use_outfit: bool = true         ## foulard, ceinture et petit sac de la taupe (ancien modèle)
+## Taupe modélisée dans Blender (corps + tenue) à la place de Mole2.fbx et de
+## la tenue en primitives. Désactiver pour revenir à l'ancien modèle.
+@export var use_mole_model: bool = true
+## Écart latéral ajouté aux mains avec la taupe Blender : le poncho est plus
+## large que l'ancien cône, les poings s'en éloignent d'autant.
+@export var mole_hand_spread: float = 0.15
 @export var use_tethers: bool = true        ## filaments électriques corps ↔ membres
 ## Pendant un coup, les filaments des poings se courbent en arc, traînant
 ## derrière le mouvement du poing comme un câble fouetté. Fraction de la
@@ -373,6 +393,10 @@ var _impact_side: float = 0.0
 
 
 func _ready() -> void:
+	if use_mole_model:
+		# Les poings pendent depuis les épaules : on écarte les deux
+		shoulder_anchor.x += mole_hand_spread * 0.5
+		hang_spread += mole_hand_spread
 	for n in [body, foot_l, foot_r, hand_l, hand_r]:
 		n.top_level = true
 
@@ -401,7 +425,9 @@ func _ready() -> void:
 		_attach_gauntlets()
 	if use_boots:
 		_attach_boots()
-	if use_outfit:
+	if use_mole_model:
+		_attach_mole_model()
+	elif use_outfit:
 		body.add_child(MoleOutfit.create(gauntlet_outline))
 	if use_tethers:
 		_attach_tethers()
@@ -427,6 +453,7 @@ func _physics_process(delta: float) -> void:
 	_update_charge_body()
 	_update_hands(delta)
 	_update_gauntlets(delta)
+	_update_trails()
 	_update_boots(delta)
 	_update_tether_bow(delta)
 	if watchdog_enabled:
@@ -726,18 +753,64 @@ func get_attack_position(t: float, side: float) -> Vector3:
 ## orientation sur le Player (cap stable, jamais incliné).
 func _sweep_position(t: float, side: float) -> Vector3:
 	var half := deg_to_rad(attack_arc) * 0.5
+	var back := deg_to_rad(attack_anticipation_deg)
+	var over := deg_to_rad(attack_overshoot_deg)
+	var a_end: float = clampf(attack_anticipation_end, 0.01, 0.9)
+	var s_end: float = clampf(attack_strike_end, a_end + 0.05, 0.98)
 
-	# Adoucit le départ et la fin sans changer les extrémités
-	var e: float = t * t * (3.0 - 2.0 * t)
+	# Trois temps : armé (recul + poing ramené), frappe (départ sec, bras
+	# tendu, dépassement), retour (le poing se pose au bout de l'arc).
+	var angle: float
+	var reach: float
+	if t < a_end:
+		var k: float = t / a_end
+		var e: float = k * k * (3.0 - 2.0 * k)
+		angle = lerpf(-half, -half - back, e)
+		reach = lerpf(1.0, 1.0 - attack_cock, e)
+	elif t < s_end:
+		var k: float = (t - a_end) / (s_end - a_end)
+		var e: float = 1.0 - pow(1.0 - k, 2.0)          # part vite, freine au bout
+		angle = lerpf(-half - back, half + over, e)
+		reach = lerpf(1.0 - attack_cock, 1.0, e) + attack_extend * sin(PI * k)
+	else:
+		var k: float = (t - s_end) / (1.0 - s_end)
+		var e: float = k * k * (3.0 - 2.0 * k)
+		angle = lerpf(half + over, half, e)
+		reach = 1.0
 
 	# La main droite balaye droite -> gauche, la gauche fait l'inverse
-	var angle: float = lerp(-half, half, e) * side
+	angle *= side
 
 	var fwd := Vector3.FORWARD.rotated(Vector3.UP, player.rotation.y)
 	var dir: Vector3 = fwd.rotated(Vector3.UP, angle)
 
 	var origin: Vector3 = body.global_position + Vector3.UP * attack_height
-	return origin + dir * attack_reach
+	return origin + dir * attack_reach * reach
+
+
+## La traînée d'air suit le poing qui frappe : main droite (coup 1, poing
+## chargé), main gauche (coup 2), les deux (slam, toupie).
+func _update_trails() -> void:
+	if _trail_r != null:
+		_trail_r.emitting = _atk_kind == 1 or _atk_kind == 3 or _punching or _spinning
+	if _trail_l != null:
+		_trail_l.emitting = _atk_kind == 2 or _atk_kind == 3 or _spinning
+
+
+## Déformation du gantelet qui frappe : étiré pendant la frappe (la vitesse
+## se voit), un peu écrasé quand il s'arrête au bout. 0 = forme normale.
+func _swing_stretch(side: float) -> float:
+	var mine: bool = (_atk_kind == 1 and side > 0.0) or (_atk_kind == 2 and side < 0.0)
+	if not mine:
+		return 0.0
+	var a_end: float = clampf(attack_anticipation_end, 0.01, 0.9)
+	var s_end: float = clampf(attack_strike_end, a_end + 0.05, 0.98)
+	if _atk_t < a_end:
+		return 0.0
+	if _atk_t < s_end:
+		return sin(PI * (_atk_t - a_end) / (s_end - a_end))
+	var k: float = (_atk_t - s_end) / (1.0 - s_end)
+	return -0.35 * sin(PI * minf(k * 2.0, 1.0))
 
 
 ## Frappe verticale : armé haut et en arrière, abattement en arc, retour en garde.
@@ -859,16 +932,26 @@ func _attach_tethers() -> void:
 		var shoulder := Vector3(shoulder_anchor.x * side, shoulder_anchor.y, shoulder_anchor.z)
 		_tethers.add_link(
 			func() -> Vector3: return body.global_transform * shoulder,
-			func() -> Vector3: return g.global_transform * Vector3(0.0, 0.0, 0.2)   # manchette
+			func() -> Vector3: return g.global_transform * (g as Gauntlet).cuff_anchor()   # manchette
 		)
 	for entry in _boots:
 		var b: Node3D = entry[0]
 		var f: Foot = entry[1]
-		var hip := Vector3(0.18 * f.side, -0.85, 0.0)
+		# Hanche : sous le corps (plus bas, le fil ressortait entre les bottes)
+		var hip := Vector3(0.16 * f.side, -0.62 if use_mole_model else -0.85, 0.0)
 		_tethers.add_link(
 			func() -> Vector3: return body.global_transform * hip,
-			func() -> Vector3: return b.global_transform * Vector3(0.0, 0.28, 0.06)   # cheville
+			func() -> Vector3: return b.global_transform * (b as MechBoot).ankle_anchor()   # cheville
 		)
+
+
+## Remplace l'ancien modèle (Mole2.fbx, instancié dans la scène) par la taupe
+## Blender. L'ancien est seulement masqué : la scène n'est pas modifiée.
+func _attach_mole_model() -> void:
+	for c in body.get_children():
+		if c.name == "Mole2" and c is Node3D:
+			(c as Node3D).visible = false
+	body.add_child(MoleModel.create(gauntlet_outline))
 
 
 ## Pose une botte sur chaque pied, rangée sous la sphère d'origine (dont on
@@ -983,6 +1066,11 @@ func _update_gauntlets(delta: float) -> void:
 		var want_q: Quaternion = (parent_rot.inverse() * aim).get_rotation_quaternion()
 		g.quaternion = g.quaternion.slerp(want_q, k).normalized()
 
+		# Étirement le long du poing (axe Z local) pendant la frappe
+		var st: float = _swing_stretch(side) * attack_stretch
+		var base_scale: Vector3 = entry[4]
+		g.scale = base_scale * Vector3(1.0 - st * 0.45, 1.0 - st * 0.45, 1.0 + st)
+
 
 ## Repère du poing qui frappe : -Z (le bout, les jointures) vers `dir`,
 ## -Y (la paume) tourné vers le joueur. Le dessous du gantelet est la paume
@@ -1053,7 +1141,8 @@ func _push_out_of_body(h: Hand) -> void:
 	var inv: Transform3D = body.global_transform.affine_inverse()
 	var lp: Vector3 = inv * h.pos
 	var flat := Vector2(lp.x, lp.z)
-	var min_r: float = MoleOutfit.body_radius(lp.y) + 0.14 * gauntlet_scale + hang_body_margin
+	var torso_r: float = MoleModel.body_radius(lp.y) if use_mole_model else MoleOutfit.body_radius(lp.y)
+	var min_r: float = torso_r + 0.14 * gauntlet_scale + hang_body_margin
 	if flat.length() >= min_r:
 		return
 	var dir2: Vector2 = flat.normalized() if flat.length() > 0.01 else Vector2(h.side, 0.0)
@@ -1155,9 +1244,20 @@ func _attach_gauntlets() -> void:
 		# Les cotes du gantelet sont en mètres : on annule l'échelle du support
 		var sc: Vector3 = holder.scale
 		g.scale = Vector3(1.0 / maxf(sc.x, 0.001), 1.0 / maxf(sc.y, 0.001), 1.0 / maxf(sc.z, 0.001)) * gauntlet_scale
+		_gauntlets[_gauntlets.size() - 1].append(g.scale)   # échelle de repos (voir _swing_stretch)
 
 		if side > 0.0:
 			_gauntlet_r = g
+
+		if use_fist_trails:
+			var trail := FistTrail.new()
+			trail.name = "FistTrail_R" if side > 0.0 else "FistTrail_L"
+			trail.target = g
+			add_child(trail)
+			if side > 0.0:
+				_trail_r = trail
+			else:
+				_trail_l = trail
 
 
 func _hand_r_mesh() -> MeshInstance3D:

@@ -11,12 +11,14 @@ class_name UndergroundAmbiance
 
 @export_group("Fond et pénombre")
 @export var background := Color("#0d0906")       ## ce qu'on voit hors des salles
-@export var ambient := Color("#6b4a30")          ## lumière diffuse de la grotte
-@export var ambient_energy: float = 0.4
+## Pénombre froide : les zones hors des lampes virent au bleu-violet, ce
+## qui fait ressortir les flaques de lumière orange.
+@export var ambient := Color("#3a3358")          ## lumière diffuse de la grotte
+@export var ambient_energy: float = 0.45
 
 @export_group("Lumière des fissures")
 @export var crack_light := Color(1.0, 0.78, 0.55)
-@export var crack_energy: float = 0.45
+@export var crack_energy: float = 0.16
 ## Ombres de la lumière des fissures. Coupées par défaut : sa direction
 ## fixe projetait des ombres sans rapport avec les lampes des salles. Les
 ## ombres viennent des lampes elles-mêmes.
@@ -25,10 +27,16 @@ class_name UndergroundAmbiance
 @export_group("Poussière")
 @export var dust_color := Color("#3a2a1c")
 @export var dust_density: float = 0.012
+## Poussière volumétrique : les lampes y dessinent des halos. Remplace la
+## brume simple (dust_density) quand elle est active.
+@export var volumetric_dust: float = 0.035
+@export var volumetric_dust_color := Color("#d9b48a")
 
 @export_group("Image")
 @export var exposure: float = 1.05
-@export var glow: float = 0.3                     ## halo autour des lampes, yeux, écrans
+@export var glow: float = 0.7                     ## halo autour des lampes, yeux, écrans
+@export var saturation: float = 1.15
+@export var contrast: float = 1.1
 @export var ambient_occlusion: bool = true        ## assombrit les coins : effet souterrain
 
 
@@ -45,13 +53,21 @@ func apply_to(env: Environment, sun: DirectionalLight3D) -> void:
 
 		env.glow_enabled = glow > 0.0
 		env.glow_intensity = glow
-		env.glow_bloom = 0.0
+		env.glow_bloom = 0.04
 		env.glow_hdr_threshold = 1.2   # seuls les points vraiment lumineux brillent
 
-		env.fog_enabled = dust_density > 0.0
+		env.volumetric_fog_enabled = volumetric_dust > 0.0
+		env.volumetric_fog_density = volumetric_dust
+		env.volumetric_fog_albedo = volumetric_dust_color
+		env.volumetric_fog_emission = Color("#1a1020")
+		env.fog_enabled = dust_density > 0.0 and volumetric_dust <= 0.0
 		env.fog_light_color = dust_color
 		env.fog_density = dust_density
 		env.fog_sky_affect = 0.0
+
+		env.adjustment_enabled = true
+		env.adjustment_saturation = saturation
+		env.adjustment_contrast = contrast
 
 		env.ssao_enabled = ambient_occlusion
 		env.ssao_intensity = 1.6

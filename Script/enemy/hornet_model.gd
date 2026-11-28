@@ -1,9 +1,13 @@
 extends Node3D
 class_name HornetModel
 
-## Frelon-perceur : apparence de l'ennemi tireur, construite en primitives.
-## Petit robot volant : thorax et tête d'acier, yeux cyan, abdomen à rayures
-## terminé par un dard, quatre ailes translucides qui battent vite.
+## Frelon-perceur : apparence de l'ennemi tireur. Insecte vivant : thorax et
+## tête de chitine, yeux composés cyan, abdomen fuselé à rayures terminé par
+## un dard, quatre ailes translucides qui battent vite.
+##
+## Le modèle vient de Blender (art_src/blender/hornet.py -> hornet.glb). Ce
+## script y retrouve les nœuds Body, Abdomen, WingHinge_0..3 par leur nom et
+## remplace chaque matériau par son équivalent toon selon son nom.
 ##
 ## Origine au sol, avant en -Z. Le corps flotte à hover_height.
 ## Le script du tireur pilote :
@@ -18,8 +22,17 @@ class_name HornetModel
 @export var curl_angle_deg: float = 140.0   ## rotation de l'abdomen recourbé
 @export var tint_strength: float = 0.7
 
+const MODEL: PackedScene = preload("res://Asset/Model/Enemy/hornet.glb")
+
 const STRIPE_REST := Color("#c8743a")
 const STRIPE_HOT := Color("#ffb24a")
+## Couleurs toon par nom de matériau Blender
+const TOON_COLORS: Dictionary = {
+	"chitin": Color("#2a1d14"),
+	"chitin_dark": Color("#16100b"),
+	"accent": Color("#b07a2e"),
+	"stinger": Color("#e8d9b0"),
+}
 
 var _body: Node3D            ## tout ce qui flotte
 var _abdomen: Node3D         ## pivot de l'abdomen
@@ -79,91 +92,40 @@ func fly(speed: float, delta: float) -> void:
 # ---------------------------------------------------------------- CONSTRUCTION
 
 func _build() -> void:
-	var B := ToonBuilder
-	_body = Node3D.new()
+	var model: Node3D = MODEL.instantiate() as Node3D
+	add_child(model)
+	_body = model.find_child("Body", true, false) as Node3D
+	_abdomen = model.find_child("Abdomen", true, false) as Node3D
 	_body.position.y = hover_height
-	add_child(_body)
+	for i in 4:
+		_wings.append(model.find_child("WingHinge_%d" % i, true, false) as Node3D)
 
-	# --- Thorax et tête ---
-	_part(_body, B.box(Vector3(0.36, 0.32, 0.4)), Vector3(0.0, 0.05, -0.05), B.STEEL_DARK)
-	_part(_body, B.box(Vector3(0.3, 0.26, 0.26)), Vector3(0.0, 0.1, -0.34), B.STEEL)
-	# Mandibules
-	for x: float in [-0.07, 0.07]:
-		_part(_body, B.box(Vector3(0.05, 0.05, 0.12)), Vector3(x, -0.02, -0.5), B.STEEL_LIGHT)
-	# Yeux : non éclairés, cyan au repos
-	_eye_mat = B.glow_material(B.SCREEN)
-	for x: float in [-0.1, 0.1]:
-		var eye := MeshInstance3D.new()
-		eye.mesh = B.box(Vector3(0.09, 0.1, 0.04))
-		eye.position = Vector3(x, 0.13, -0.48)
-		eye.material_override = _eye_mat
-		_body.add_child(eye)
-	# Antennes
-	for x: float in [-0.07, 0.07]:
-		var ant := _part(_body, B.box(Vector3(0.025, 0.25, 0.025)), Vector3(x * 1.6, 0.32, -0.4), B.STEEL_DARK)
-		ant.rotation = Vector3(deg_to_rad(-30.0), 0.0, deg_to_rad(-20.0 if x < 0.0 else 20.0))
-
-	# --- Abdomen à rayures + dard ---
-	_abdomen = Node3D.new()
-	_abdomen.position = Vector3(0.0, 0.0, 0.16)
-	_body.add_child(_abdomen)
-	_stripe_mat = B.glow_material(STRIPE_REST)
-	var segs: Array = [
-		# [taille, z, y]
-		[Vector3(0.36, 0.32, 0.3), 0.18, -0.03],
-		[Vector3(0.3, 0.27, 0.26), 0.43, -0.07],
-		[Vector3(0.22, 0.2, 0.2), 0.64, -0.11],
-	]
-	for i in segs.size():
-		var s: Vector3 = segs[i][0]
-		var z: float = segs[i][1]
-		var y: float = segs[i][2]
-		_part(_abdomen, B.box(s), Vector3(0.0, y, z), Color("#1a130d"))
-		# Bande qui s'allume pendant la visée (légèrement plus grande : dépasse)
-		var band := MeshInstance3D.new()
-		band.mesh = B.box(Vector3(s.x + 0.02, s.y + 0.02, s.z * 0.45))
-		band.position = Vector3(0.0, y, z)
-		band.material_override = _stripe_mat
-		_abdomen.add_child(band)
-	var stinger := _part(_abdomen, ToonBuilder.cylinder(0.035, 0.28, 8), Vector3(0.0, -0.13, 0.86), B.STEEL_LIGHT)
-	stinger.rotation.x = PI * 0.5
-
-	# --- Ailes : deux paires translucides ---
+	_eye_mat = ToonBuilder.glow_material(ToonBuilder.SCREEN)
+	_stripe_mat = ToonBuilder.glow_material(STRIPE_REST)
 	var wing_mat := StandardMaterial3D.new()
 	wing_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	wing_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	wing_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	wing_mat.albedo_color = Color(0.37, 0.88, 1.0, 0.35)
-	for pair: Array in [[-0.08, 0.55, 0.2], [0.08, 0.4, 0.15]]:
-		for side: float in [-1.0, 1.0]:
-			var hinge := Node3D.new()
-			hinge.position = Vector3(0.12 * side, 0.22, pair[0])
-			_body.add_child(hinge)
-			_wings.append(hinge)
-			var wing := MeshInstance3D.new()
-			wing.mesh = B.box(Vector3(pair[1], 0.015, pair[2]))
-			wing.position = Vector3(pair[1] * 0.5 * side, 0.0, 0.05)
-			wing.rotation.y = deg_to_rad(-12.0) * side
-			wing.material_override = wing_mat
-			wing.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			hinge.add_child(wing)
 
-	# --- Pattes pendantes ---
-	for z: float in [-0.15, 0.0, 0.12]:
-		for side: float in [-1.0, 1.0]:
-			var leg := _part(_body, B.box(Vector3(0.03, 0.28, 0.03)), Vector3(0.15 * side, -0.2, z), B.STEEL_DARK)
-			leg.rotation = Vector3(deg_to_rad(15.0), 0.0, deg_to_rad(18.0) * side)
+	for node: Node in model.find_children("*", "MeshInstance3D", true, false):
+		var mi: MeshInstance3D = node as MeshInstance3D
+		for s in mi.mesh.get_surface_count():
+			var src: Material = mi.mesh.surface_get_material(s)
+			var mat_name: String = src.resource_name if src != null else ""
+			match mat_name:
+				"eye":
+					mi.set_surface_override_material(s, _eye_mat)
+				"stripe":
+					mi.set_surface_override_material(s, _stripe_mat)
+				"wing":
+					mi.set_surface_override_material(s, wing_mat)
+					mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				_:
+					var color: Color = TOON_COLORS.get(mat_name, TOON_COLORS["chitin"])
+					var mat: Material = ToonBuilder.toon_material(color, outline_width, true)
+					mi.set_surface_override_material(s, mat)
+					if mat is ShaderMaterial:
+						_tinted.append([mat, color])
 
 	set_curl(0.0)
-
-
-func _part(parent: Node3D, mesh: Mesh, pos: Vector3, color: Color) -> MeshInstance3D:
-	var m := MeshInstance3D.new()
-	m.mesh = mesh
-	m.position = pos
-	var mat: Material = ToonBuilder.toon_material(color, outline_width)
-	m.material_override = mat
-	if mat is ShaderMaterial:
-		_tinted.append([mat, color])
-	parent.add_child(m)
-	return m

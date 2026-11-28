@@ -49,6 +49,9 @@ extends Node
 ## Durée du coup lourd déclenché par la commande réaction. Remplace
 ## durations[2] : un finisher trop long casse le rythme du combat.
 @export var finisher_duration: float = 0.45
+## Ralentit les coups 1 et 2 du combo sans toucher aux durées réglées dans
+## les scènes : 1 = durées d'origine, plus = coups plus posés et plus lourds.
+@export var combo_slowdown: float = 1.35
 ## Distance à laquelle le joueur s'arrête devant l'ennemi étourdi.
 @export var finisher_standoff: float = 1.2
 ## Vitesse max du bond vers l'ennemi étourdi (évite de traverser la salle).
@@ -60,6 +63,9 @@ extends Node
 ## 5 m/s donne un glissé d'environ un demi-mètre.
 @export var lunge_speed: Array[float] = [5.0, 5.0, 4.0]
 @export var lunge_standoff: float = 1.6  ## en dessous, pas de rapprochement
+## Sans cible, le corps accompagne quand même le coup d'un petit pas en
+## avant : le poids passe dans le poing, même dans le vide.
+@export var whiff_step_speed: Array[float] = [2.2, 2.2, 3.0]
 
 @export_group("Attaque chargée")
 @export var charge_delay: float = 0.15       ## maintien avant d'entrer en charge
@@ -125,7 +131,9 @@ extends Node
 @export var prompt_color := Color(1.0, 0.85, 0.2)
 
 @export_group("Hit stop")
-@export var hit_stop_time: float = 0.0            ## coup du combo (0 = pas de gel)
+## Coup du combo : micro-gel à peine perceptible, qui donne du poids sans
+## casser le rythme (0 = pas de gel)
+@export var hit_stop_time: float = 0.045
 @export var finisher_hit_stop_time: float = 0.11  ## coup lourd
 @export var hit_stop_scale: float = 0.0           ## 0 = arrêt net, plus sec qu'un ralenti
 
@@ -305,7 +313,7 @@ func _physics_process(delta: float) -> void:
 	if _step == 0:
 		return
 
-	var dur: float = finisher_duration if _step == 3 else durations[_step - 1]
+	var dur: float = finisher_duration if _step == 3 else durations[_step - 1] * combo_slowdown
 	_t += delta / maxf(dur, 0.01)
 	if _step == 3:
 		_steer_finisher(dur)
@@ -434,6 +442,12 @@ func _start_finisher(target: Node) -> void:
 func _lunge(step: int) -> void:
 	var target = rig.get_magnet_target()
 	if target == null:
+		var fwd: Vector3 = -player.global_transform.basis.z
+		fwd.y = 0.0
+		if fwd.length() > 0.01 and step - 1 < whiff_step_speed.size():
+			var step_v: Vector3 = fwd.normalized() * whiff_step_speed[step - 1]
+			player.velocity.x += step_v.x
+			player.velocity.z += step_v.z
 		return
 
 	var to_e: Vector3 = target.global_position - player.global_position
@@ -490,9 +504,8 @@ func _collect_hits() -> void:
 			else:
 				_play_punch_sound(e.global_position)
 			_sparks.burst(fist.global_position, dir, _step == 3)
-			# Gel du temps réservé aux gros coups : le combo reste fluide
-			if _step == 3:
-				_hit_stop(true)
+			# Micro-gel sur chaque coup du combo, gel franc sur le coup lourd
+			_hit_stop(_step == 3)
 			_shake(finisher_shake if _step == 3 else hit_shake)
 
 			var side: float = 1.0 if fist == fist_r else -1.0

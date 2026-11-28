@@ -7,9 +7,25 @@ class_name MechBoot
 ##
 ## Origine au sol (sous la semelle), avant en -Z. Cotes en mètres : le rig
 ## compense l'échelle du nœud parent.
+##
+## Modèle Blender (art_src/blender/gear.py -> Asset/Model/Player/boot.glb)
+## quand use_model est vrai ; sinon l'ancienne version en primitives.
+
+const MODEL: PackedScene = preload("res://Asset/Model/Player/boot.glb")
+## Modèle Blender (true) ou ancienne construction en primitives (false).
+static var use_model: bool = true
+## Doit suivre BOOT_SCALE dans art_src/blender/gear.py
+const MODEL_SCALE := 1.25
 
 var side: float = 1.0          ## -1 pied gauche, +1 pied droit
 var outline_width: float = 0.008
+
+
+## Point d'attache du filament électrique : haut du manchon de cheville.
+func ankle_anchor() -> Vector3:
+	if use_model:
+		return Vector3(0.0, 0.3, 0.06) * MODEL_SCALE
+	return Vector3(0.0, 0.28, 0.06)
 
 
 static func create(foot_side: float, outline: float = 0.008) -> MechBoot:
@@ -22,6 +38,24 @@ static func create(foot_side: float, outline: float = 0.008) -> MechBoot:
 
 
 func _build() -> void:
+	if use_model:
+		_build_model()
+	else:
+		_build_primitives()
+
+
+func _build_model() -> void:
+	var B := ToonBuilder
+	var part: Node3D = ModelSkin.extract(MODEL, "Boot_" + ("L" if side < 0.0 else "R"))
+	add_child(part)
+	var colors: Dictionary = {
+		"rust": B.RUST, "rust_dark": B.RUST_DARK, "steel": B.STEEL,
+		"steel_dark": B.STEEL_DARK, "steel_light": B.STEEL_LIGHT, "hazard": B.HAZARD,
+	}
+	ModelSkin.apply(part, colors, {"screen": B.SCREEN}, outline_width)
+
+
+func _build_primitives() -> void:
 	var B := ToonBuilder
 
 	# --- Semelle épaisse, qui dépasse un peu tout autour ---
@@ -58,6 +92,6 @@ func _part(mesh: Mesh, pos: Vector3, color: Color) -> MeshInstance3D:
 	var m := MeshInstance3D.new()
 	m.mesh = mesh
 	m.position = pos
-	m.material_override = ToonBuilder.toon_material(color, outline_width)
+	m.material_override = ToonBuilder.toon_material(color, outline_width, true)
 	add_child(m)
 	return m

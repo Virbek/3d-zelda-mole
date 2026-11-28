@@ -22,7 +22,11 @@ const SCREEN := Color("#5fe1ff")
 const THREAT := Color("#ff7a2a")
 
 
-static func toon_material(color: Color, outline_width: float = 0.01) -> Material:
+## rim : liseré clair sur les bords côté lumière (personnages et ennemis ;
+## pas le décor, où un grand sol vu en rasant s'éclaircirait en entier).
+## grime : salissures du décor (taches de rouille, pied plus sombre, grain).
+## Objets fixes seulement : le motif est calculé en coordonnées monde.
+static func toon_material(color: Color, outline_width: float = 0.01, rim: bool = false, grime: bool = false) -> Material:
 	var shader: Shader = load(TOON_SHADER_PATH) as Shader
 	if shader == null:
 		var fallback := StandardMaterial3D.new()
@@ -34,6 +38,10 @@ static func toon_material(color: Color, outline_width: float = 0.01) -> Material
 	mat.set_shader_parameter("albedo_color", color)
 	mat.set_shader_parameter("use_texture", false)
 	mat.set_shader_parameter("shadow_color", SHADOW)
+	if rim:
+		mat.set_shader_parameter("rim_amount", 1.0)
+	if grime:
+		mat.set_shader_parameter("grime", 1.0)
 
 	if outline_width > 0.0:
 		var outline_shader: Shader = load(OUTLINE_SHADER_PATH) as Shader

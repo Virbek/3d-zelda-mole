@@ -253,6 +253,6 @@ func _part(mesh: Mesh, pos: Vector3, color: Color) -> MeshInstance3D:
 	var m := MeshInstance3D.new()
 	m.mesh = mesh
 	m.position = pos
-	m.material_override = ToonBuilder.toon_material(color, 0.012)
+	m.material_override = ToonBuilder.toon_material(color, 0.012, false, true)
 	add_child(m)
 	return m

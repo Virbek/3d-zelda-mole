@@ -19,6 +19,10 @@ extends Node3D
 @export var shake_decay: float = 4.0
 @export var shake_amount: float = 0.5
 @export var shake_speed: float = 28.0
+## Coup de zoom bref vers l'action sur les grosses secousses (coups lourds)
+@export var punch_zoom: float = 0.09          ## part du cadrage rognée au pic
+@export var punch_threshold: float = 0.4      ## secousse minimale qui déclenche le zoom
+@export var punch_decay: float = 14.0
 
 @export_group("Ciblage")
 @export var lock_focus_weight: float = 0.35    ## 0 = full joueur, 1 = full cible
@@ -62,6 +66,8 @@ var _threat_w: float = 0.0
 @onready var cam: Camera3D = $Camera3D
 
 var _shake: float = 0.0
+var _punch: float = 0.0
+var _punch_applied: float = 0.0    ## part de zoom appliquée à l'image précédente
 var _shake_time: float = 0.0
 
 ## En perspective, size ne fait rien : le zoom recule la caméra.
@@ -133,6 +139,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _update_shake(delta: float) -> void:
+	_update_punch(delta)
 	if _shake > 0.0:
 		_shake = maxf(_shake - shake_decay * delta * _shake, 0.0)
 		_shake_time += delta * shake_speed
@@ -183,6 +190,22 @@ func _is_ortho() -> bool:
 
 func shake(strength: float) -> void:
 	_shake = maxf(_shake, strength)
+	if strength >= punch_threshold:
+		_punch = maxf(_punch, clampf(strength, 0.0, 1.0))
+
+
+## Rogne brièvement le cadrage puis le relâche. On retire d'abord la part
+## appliquée à l'image précédente : le zoom normal (lissé) n'est pas faussé.
+func _update_punch(delta: float) -> void:
+	var k: float = _punch * punch_zoom
+	if _is_ortho():
+		cam.size = cam.size / maxf(1.0 - _punch_applied, 0.01) * (1.0 - k)
+	else:
+		# Perspective : on resserre le champ (la distance, elle, est pilotée
+		# par le zoom et les cinématiques)
+		cam.fov = cam.fov / maxf(1.0 - _punch_applied, 0.01) * (1.0 - k)
+	_punch_applied = k
+	_punch = maxf(_punch - punch_decay * delta * maxf(_punch, 0.15), 0.0)
 
 ## Barycentre des ennemis proches, pondéré par leur proximité. Pas de cible
 ## unique : la caméra recule simplement vers le centre de gravité du danger,

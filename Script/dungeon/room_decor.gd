@@ -54,7 +54,7 @@ func _mesh(mesh: Mesh, pos: Vector3, mat: Material, parent: Node3D = null) -> Me
 
 
 func _toon(c: Color, outline: float = 0.0) -> Material:
-	return ToonBuilder.toon_material(c, outline)
+	return ToonBuilder.toon_material(c, outline, false, true)
 
 
 ## Vrai si une porte occupe ce côté et que x (le long du mur) tombe dans son

@@ -90,12 +90,12 @@ func _build_visual() -> void:
 	var body_h: float = size.y - LID_H
 	var hx: float = size.x * 0.5
 	var hz: float = size.z * 0.5
-	var rust := ToonBuilder.toon_material(body_color, 0.012)
-	var rust_light := ToonBuilder.toon_material(body_color.lightened(0.15), 0.012)
-	var steel := ToonBuilder.toon_material(trim_color, 0.01)
-	var steel_dark := ToonBuilder.toon_material(ToonBuilder.STEEL_DARK, 0.0)
-	var hazard := ToonBuilder.toon_material(ToonBuilder.HAZARD, 0.0)
-	var ink := ToonBuilder.toon_material(Color("#20140c"), 0.0)
+	var rust := ToonBuilder.toon_material(body_color, 0.012, false, true)
+	var rust_light := ToonBuilder.toon_material(body_color.lightened(0.15), 0.012, false, true)
+	var steel := ToonBuilder.toon_material(trim_color, 0.01, false, true)
+	var steel_dark := ToonBuilder.toon_material(ToonBuilder.STEEL_DARK, 0.0, false, true)
+	var hazard := ToonBuilder.toon_material(ToonBuilder.HAZARD, 0.0, false, true)
+	var ink := ToonBuilder.toon_material(Color("#20140c"), 0.0, false, true)
 
 	# Caisse
 	_add_box(_visual, Vector3(size.x, body_h, size.z), Vector3(0.0, body_h * 0.5, 0.0), rust)

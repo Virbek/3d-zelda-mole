@@ -46,12 +46,16 @@ var with_lamps: bool = true
 var with_decor: bool = true
 
 ## Lampes murales : seule vraie source de lumière de la raffinerie ensevelie
-const LAMP_COLOR := Color(1.0, 0.62, 0.3)
-const LAMP_ENERGY := 0.65
-const LAMP_RANGE := 7.0
+## Fortes et localisées : des flaques de lumière chaude entre des zones
+## d'ombre froides (l'ambiante est bleutée, voir UndergroundAmbiance).
+const LAMP_COLOR := Color(1.0, 0.63, 0.29)
+const LAMP_ENERGY := 1.3
+const LAMP_RANGE := 10.0
 ## 1 = décroissance douce. Plus haut, la lumière se concentre en un point
 ## chaud sous l'applique (halo trop marqué sur le mur et le sol).
 const LAMP_FALLOFF := 1.0
+## Part de la lampe qui éclaire la poussière en suspension (halo visible)
+const LAMP_FOG_ENERGY := 0.8
 
 var chunk_length: float = 2.0
 
@@ -231,11 +235,11 @@ func set_intro_set(on: bool) -> void:
 	var sp: Vector2 = spacing
 	var bp: Vector3 = breach_point()
 	var h: float = INTRO_WALL_HEIGHT
-	var rock := ToonBuilder.toon_material(wall_color.darkened(0.35), 0.01)
-	var beam := ToonBuilder.toon_material(ToonBuilder.RUST_DARK, 0.01)
-	var steel := ToonBuilder.toon_material(ToonBuilder.STEEL_DARK, 0.0)
+	var rock := ToonBuilder.toon_material(wall_color.darkened(0.35), 0.01, false, true)
+	var beam := ToonBuilder.toon_material(ToonBuilder.RUST_DARK, 0.01, false, true)
+	var steel := ToonBuilder.toon_material(ToonBuilder.STEEL_DARK, 0.0, false, true)
 	# Haut du mur au-dessus de la brèche (le bloc qui casse fait wall_height)
-	_intro_box(Vector3(BREACH_WIDTH + 0.1, h - wall_height, wall_thickness * 0.5), bp + Vector3.UP * (wall_height + (h - wall_height) * 0.5), ToonBuilder.toon_material(wall_color, 0.01))
+	_intro_box(Vector3(BREACH_WIDTH + 0.1, h - wall_height, wall_thickness * 0.5), bp + Vector3.UP * (wall_height + (h - wall_height) * 0.5), ToonBuilder.toon_material(wall_color, 0.01, false, true))
 	# Plafond : dalle de roche, poutres rouillées et une conduite
 	var depth: float = INTRO_CEILING_DEPTH
 	var z_wall: float = bp.z + wall_thickness * 0.25
@@ -370,7 +374,7 @@ func _build_breach_rubble() -> void:
 		for i in 5:
 			var r := MeshInstance3D.new()
 			r.mesh = ToonBuilder.box(Vector3.ONE * rng.randf_range(0.25, 0.5))
-			r.material_override = ToonBuilder.toon_material(wall_color.darkened(rng.randf_range(0.0, 0.25)), 0.01)
+			r.material_override = ToonBuilder.toon_material(wall_color.darkened(rng.randf_range(0.0, 0.25)), 0.01, false, true)
 			r.position = bp + Vector3(sx * (w * 0.5 + rng.randf_range(-0.2, 0.4)), rng.randf_range(0.1, 0.35), rng.randf_range(-0.9, 0.1))
 			r.rotation = Vector3(rng.randf(), rng.randf(), rng.randf()) * 0.8
 			add_decor(r)
@@ -550,8 +554,11 @@ func _add_lamp(pos: Vector3, facing: Vector3) -> void:
 	lamp.name = "Lamp"
 	lamp.position = pos
 	add_decor(lamp)   # masquée (et éteinte) tant que le voile couvre sa salle
+	# Orientation en repère local : look_at_from_position() prend des
+	# coordonnées monde et posait les lampes de toutes les salles autour de
+	# l'origine du monde au lieu de leur propre salle.
 	if facing.length() > 0.01:
-		lamp.look_at_from_position(pos, pos + facing, Vector3.UP)
+		lamp.basis = Basis.looking_at(facing, Vector3.UP)
 
 	var bracket := MeshInstance3D.new()
 	var bm := BoxMesh.new()
@@ -580,6 +587,7 @@ func _add_lamp(pos: Vector3, facing: Vector3) -> void:
 	light.light_energy = LAMP_ENERGY
 	light.omni_range = LAMP_RANGE
 	light.omni_attenuation = LAMP_FALLOFF
+	light.light_volumetric_fog_energy = LAMP_FOG_ENERGY
 	# Les ombres viennent des lampes, pas du soleil : elles partent bien de la
 	# source qu'on voit. Seules les lampes de la salle courante sont allumées.
 	light.shadow_enabled = true

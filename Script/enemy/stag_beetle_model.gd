@@ -140,7 +140,7 @@ func _part(mesh: Mesh, pos: Vector3, color: Color, parent: Node3D = null) -> Mes
 	var m := MeshInstance3D.new()
 	m.mesh = mesh
 	m.position = pos
-	var mat: Material = ToonBuilder.toon_material(color, outline_width)
+	var mat: Material = ToonBuilder.toon_material(color, outline_width, true)
 	m.material_override = mat
 	if mat is ShaderMaterial:
 		_tinted.append([mat, color])
